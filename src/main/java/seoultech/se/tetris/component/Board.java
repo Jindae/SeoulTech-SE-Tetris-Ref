@@ -17,6 +17,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.BitSet;
 import java.util.function.IntConsumer;
+import java.util.function.Consumer;
 import static seoultech.se.tetris.component.Maincontainer.changeColor;
 
 import javax.swing.BorderFactory;
@@ -35,6 +36,10 @@ import seoultech.se.tetris.blocks.CrossBlock;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.GameMode;
 import seoultech.se.tetris.rules.CollisionRules;
+import seoultech.se.tetris.attack.AttackEvent;
+import seoultech.se.tetris.attack.AttackQueue;
+import seoultech.se.tetris.attack.AttackRow;
+import seoultech.se.tetris.attack.AttackRules;
 
 public class Board extends JComponent {
 	private static final long serialVersionUID = 2434035659171694595L;
@@ -58,6 +63,10 @@ public class Board extends JComponent {
 	private int score = 0;
 	private Block next;
 	private int erasedLineNum = 0;
+    private static final int GARBAGE_CELL = 1;
+    private static final Color GARBAGE_COLOR = Color.GRAY;
+    private final AttackQueue pendingAttacks = new AttackQueue(WIDTH);
+    private Consumer<AttackEvent> attackSink = ignored -> {};
     private int pendingItems;
 	private int level = 1;
     private final java.util.BitSet clearingRows = new java.util.BitSet(HEIGHT);
@@ -93,6 +102,7 @@ public class Board extends JComponent {
 
 	protected void boardStart() {
         pendingItems = 0;
+        pendingAttacks.clear();
 		curr = blockGenerator.nextBlock(gamepanel.getDifficulty());
 		next = blockGenerator.nextBlock(gamepanel.getDifficulty());
 		this.gamepanel.drawNextBoard(next);
@@ -234,6 +244,11 @@ public class Board extends JComponent {
         if (curr instanceof ItemBlock && !useItem()) return false;
 		eraseLine();
 
+        if (applyPendingAttacks()) {
+            finishGameOver();
+            return false;
+        }
+
 		if (isgameover()) return false;
 		curr = next;
         anchorTouched = false;
@@ -323,13 +338,72 @@ public class Board extends JComponent {
 	protected void reset() {
 		this.board = new int[HEIGHT][WIDTH];
         pendingItems = 0;
+        pendingAttacks.clear();
 	}
 
 	protected void eraseLine() {
         BitSet fullRows = completedRows();
         if (fullRows.isEmpty()) return;
+        var attack = gamepanel != null && gamepanel.getGameMode() == GameMode.CLASSIC
+            ? AttackRules.fromNormalClear(board, fullRows, curr, x, y)
+            : java.util.Optional.<AttackEvent>empty();
         animateClearedRows(fullRows);
         removeRows(fullRows);
+        attack.ifPresent(attackSink);
+    }
+
+    /* 로컬과 P2P의 공격 수신 지점 */
+    public void receiveAttack(AttackEvent attack) {
+        pendingAttacks.enqueue(attack);
+        repaint();
+    }
+
+    public void setAttackSink(Consumer<AttackEvent> sink) {
+        attackSink = java.util.Objects.requireNonNull(sink, "sink");
+    }
+
+    public java.util.List<AttackRow> pendingAttackRows() {
+        return pendingAttacks.snapshot();
+    }
+
+    private boolean applyPendingAttacks() {
+        java.util.List<AttackRow> incoming = pendingAttacks.drain();
+        if (incoming.isEmpty()) return false;
+        int count = incoming.size();
+        boolean overflow = false;
+        for (int row = 0; row < count; row++) {
+            for (int column = 0; column < WIDTH; column++) {
+                if (board[row][column] != 0) overflow = true;
+            }
+        }
+        for (int row = 0; row < HEIGHT - count; row++) {
+            board[row] = board[row + count];
+            for (int column = 0; column < WIDTH; column++) {
+                textChunks.set((row + 1) * (WIDTH + 3) + column + 1,
+                    textChunks.get((row + count + 1) * (WIDTH + 3) + column + 1));
+            }
+        }
+        for (int index = 0; index < count; index++) {
+            int row = HEIGHT - count + index;
+            AttackRow attackRow = incoming.get(index);
+            board[row] = new int[WIDTH];
+            for (int column = 0; column < WIDTH; column++) {
+                boolean occupied = attackRow.occupiedAt(column);
+                board[row][column] = occupied ? GARBAGE_CELL : 0;
+                textChunks.set((row + 1) * (WIDTH + 3) + column + 1,
+                    new TextChunk(occupied ? "G" : " ", occupied ? GARBAGE_COLOR : Color.WHITE));
+            }
+        }
+        return overflow;
+    }
+
+    private void finishGameOver() {
+        if (timer != null) {
+            timer.stop();
+            stopAnimations();
+            timer = null;
+            gamepanel.gameOver();
+        }
     }
 
     private BitSet completedRows() {
@@ -556,12 +630,7 @@ public class Board extends JComponent {
 		for (int i = 0; i < next.height(); i++) {
 			for (int j = 0; j < next.width(); j++) {
 				if (board[i][j+3] + next.getShape(j, i) > 1) {
-					if (timer != null) {
-						timer.stop();
-                        stopAnimations();
-						timer = null;
-						gamepanel.gameOver();
-					}
+					finishGameOver();
 					return true;
 				}
 			}
