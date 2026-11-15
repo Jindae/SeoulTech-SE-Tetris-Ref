@@ -341,6 +341,7 @@ public class Board extends JComponent {
     }
 
     private void removeRows(BitSet rows) {
+        gamepanel.publishLinesCleared(rows.cardinality());
         int destination = HEIGHT - 1;
         for (int source = HEIGHT - 1; source >= 0; source--) {
             if (rows.get(source)) continue;
@@ -549,6 +550,7 @@ public class Board extends JComponent {
 
 	protected void addScore(int POINT) {
 		this.score += POINT;
+		this.gamepanel.publishScore(this.score);
 		this.gamepanel.drawScore();
 	}
 

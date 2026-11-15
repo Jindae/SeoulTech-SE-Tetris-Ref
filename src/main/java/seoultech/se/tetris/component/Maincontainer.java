@@ -29,6 +29,7 @@ public class Maincontainer extends JFrame{
     protected static int HARD_DROP = 32;
     protected static String colorPalette = "Normal"; // Normal, Protanopia, Deuteranopia, Tritanopia 중 선택한 색상 모드
     private Difficulty difficulty = Difficulty.NORMAL;
+    private int timeLimitSeconds = 180;
     protected Setting setting;
     private JPanel mainPanel; // 시작·게임·설정·점수판 화면을 담는 루트 패널
     private CardLayout cardLayout; // mainPanel에 등록한 화면 사이의 전환을 담당한다.
@@ -137,6 +138,7 @@ public class Maincontainer extends JFrame{
         colorPalette = setting.getColorPalette();
         // difficulty
         difficulty = Difficulty.parse(setting.getDifficulty()).orElse(Difficulty.NORMAL);
+        timeLimitSeconds = Integer.parseInt(setting.getTimeLimitSeconds());
 
         // container에 띄우기 위한 빈 panel
         mainPanel.setPreferredSize(new Dimension(WIDTH, HEIGHT));
@@ -153,6 +155,7 @@ public class Maincontainer extends JFrame{
     public Difficulty getDifficulty() {
         return difficulty == null ? Difficulty.NORMAL : difficulty;
     }
+    public int getTimeLimitSeconds() { return timeLimitSeconds; }
 
     protected void setDifficulty(Difficulty difficulty) {
         this.difficulty = difficulty == null ? Difficulty.NORMAL : difficulty;
@@ -219,7 +222,8 @@ public class Maincontainer extends JFrame{
             // 기존 설정 파일의 저장 항목을 유지한다. 점수 초기화는 ScoreStore.clear()가 수행한다.
             "resetScore", new ArrayList<>(List.of("false")),
             "colorBlind", new ArrayList<>(List.of("Normal","Protanopia","Deuteranopia","Tritanopia")),
-            "difficulty", new ArrayList<>(List.of("Easy","Normal","Hard"))
+            "difficulty", new ArrayList<>(List.of("Easy","Normal","Hard")),
+            "timeLimitSeconds", new ArrayList<>(List.of("60","180","300"))
         ));
 
         public Setting() {
@@ -253,6 +257,15 @@ public class Maincontainer extends JFrame{
         protected String nextDifficulty() {
             currentSettingMap.get("difficulty").changeSetting();
             return getDifficulty();
+        }
+
+        protected String getTimeLimitSeconds() {
+            return currentSettingMap.get("timeLimitSeconds").getCurrentSetting();
+        }
+
+        protected String nextTimeLimitSeconds() {
+            currentSettingMap.get("timeLimitSeconds").changeSetting();
+            return getTimeLimitSeconds();
         }
 
         // 문자열에서 새 배열을 만들므로 화면의 편집이 저장된 값에 전파되지 않는다.
