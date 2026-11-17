@@ -13,11 +13,13 @@ import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.SwingUtilities;
-import javax.swing.Timer;
 import javax.imageio.ImageIO;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.GameMode;
 import seoultech.se.tetris.blocks.Block;
+import seoultech.se.tetris.blocks.OBlock;
+import seoultech.se.tetris.game.GameConfig;
+import seoultech.se.tetris.game.GameEngineFixture;
 import sun.misc.Unsafe;
 
 /** Real headless game components, with board state arranged for acceptance boundaries. */
@@ -25,7 +27,7 @@ final class ExistingFeatureFixture implements AutoCloseable {
     final Maincontainer owner;
     final Gamepanel game;
     final Board board;
-    private final Timer initialTimer;
+    final GameEngineFixture engineFixture;
 
     ExistingFeatureFixture(Difficulty difficulty) throws Exception {
         this(difficulty, GameMode.ITEM);
@@ -37,30 +39,17 @@ final class ExistingFeatureFixture implements AutoCloseable {
         owner = (Maincontainer) ((Unsafe) unsafeField.get(null)).allocateInstance(Maincontainer.class);
         owner.setting = owner.new Setting();
         owner.setDifficulty(difficulty);
-        game = new Gamepanel(owner, mode);
+        engineFixture = new GameEngineFixture(new GameConfig(mode, difficulty), scriptedBlocks());
+        game = new Gamepanel(owner, mode, engineFixture.engine, System::nanoTime);
         game.startGame();
         board = get(game, "board", Board.class);
-        initialTimer = board.timer;
-        initialTimer.stop();
+        game.controller().timer().stop();
     }
 
     void prepare(Block current, Block next, int[][] grid, int x, int y) throws Exception {
-        board.stopAnimations();
-        board.timer.stop();
-        set(board, "board", grid);
-        set(board, "curr", current);
-        set(board, "next", next);
-        set(board, "score", 0);
-        set(board, "erasedLineNum", 0);
-        set(board, "level", 1);
-        set(board, "isPaused", false);
-        set(board, "anchorTouched", false);
-        board.x = x;
-        board.y = y;
-        board.setText("");
-        board.setText(("X".repeat(12) + "\n")
-            + ("X" + " ".repeat(10) + "X\n").repeat(20) + "X".repeat(12));
-        invoke(board, "placeBlock");
+        engineFixture.seed(current, next, x, y);
+        engineFixture.seedGrid(grid);
+        game.controller().refreshSnapshot();
     }
 
     BufferedImage render(String filename) throws Exception {
@@ -141,8 +130,13 @@ final class ExistingFeatureFixture implements AutoCloseable {
 
     @Override
     public void close() {
-        board.stopAnimations();
-        initialTimer.stop();
-        if (board.timer != null) board.timer.stop();
+        game.stopGame();
+        game.controller().timer().stop();
+    }
+
+    private static Block[] scriptedBlocks() {
+        Block[] blocks = new Block[64];
+        java.util.Arrays.setAll(blocks, ignored -> new OBlock());
+        return blocks;
     }
 }

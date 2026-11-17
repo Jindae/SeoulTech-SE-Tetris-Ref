@@ -18,6 +18,9 @@ import seoultech.se.tetris.GameMode;
 import seoultech.se.tetris.blocks.CrossBlock;
 import seoultech.se.tetris.blocks.ItemBlock;
 
+import seoultech.se.tetris.game.GameEngineFixture;
+import seoultech.se.tetris.game.GamePhase;
+
 /** Real JFrame lifecycle with synthetic listener input; no OS installation/physical-key claim. */
 public final class DesktopSmoke {
     private static Object field(Object object, String name) throws ReflectiveOperationException {
@@ -45,31 +48,41 @@ public final class DesktopSmoke {
         ImageIO.write(image, "png", path.toFile());
     }
 
+    // Let the real Swing timer finish the asynchronous item animation without blocking the EDT.
+    private static void awaitEffect(Gamepanel game) {
+        var loop = java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+        long deadline = System.nanoTime() + 3_000_000_000L;
+        var poll = new javax.swing.Timer(10, event -> {
+            if (game.controller().snapshot().phase() != GamePhase.RESOLVING
+                    || System.nanoTime() >= deadline) loop.exit();
+        });
+        poll.start();
+        try { loop.enter(); } finally { poll.stop(); }
+        check(game.controller().snapshot().phase() == GamePhase.ACTIVE,
+            "item animation must finish through the real controller timer");
+    }
+
     private static void crossItemFlow(Maincontainer frame, Path evidence) throws Exception {
         frame.exitStartEnterGame("Item");
         Gamepanel game = (Gamepanel) field(frame, "gamePanel");
-        Board board = (Board) field(game, "board");
-        board.timer.stop();
-        ExistingFeatureFixture.invoke(board, "eraseCurr");
-        CrossBlock current = new CrossBlock();
-        CrossBlock preview = new CrossBlock();
-        ExistingFeatureFixture.set(board, "curr", current);
-        ExistingFeatureFixture.set(board, "next", preview);
-        ExistingFeatureFixture.set(board, "erasedLineNum", 9);
-        board.x = 4;
-        board.y = 18;
-        ExistingFeatureFixture.invoke(board, "placeBlock");
-        game.drawNextBoard(preview);
+        GameController controller = game.controller();
+        controller.timer().stop();
+        var setup = new GameEngineFixture(controller.engine());
+        setup.seed(new CrossBlock(), new CrossBlock(), 4, 18);
+        setup.progress(0, 9, 1);
+        controller.refreshSnapshot();
+        var preview = controller.snapshot().next();
         capture(frame, evidence.resolve("cross-item-and-preview.png"));
 
         key(game, Maincontainer.HARD_DROP);
+        awaitEffect(game);
 
-        check(board.getScore() == 300, "P floor lock must score exactly two cleared rows");
-        check((int) field(board, "erasedLineNum") == 11, "P rows must count toward supply");
-        check(field(board, "curr") == preview, "P preview must become the current block unchanged");
-        check(field(board, "next") instanceof ItemBlock, "crossing ten rows must supply an item preview");
+        check(controller.snapshot().score() == 300, "P floor lock must score exactly two cleared rows");
+        check(controller.snapshot().clearedLines() == 11, "P rows must count toward supply");
+        check(controller.snapshot().current().equals(preview), "P preview must become the current block unchanged");
+        check(java.util.Set.of("Row", "Column", "Anchor", "Bomb", "Cross").contains(controller.snapshot().next().kind()), "crossing ten rows must supply an item preview");
         key(game, KeyEvent.VK_ESCAPE);
-        check(game.getParent() == null && board.timer == null, "P game must cleanly return to the menu");
+        check(game.getParent() == null && !controller.timer().isRunning(), "P game must cleanly return to the menu");
     }
 
     private static void savedHardDropItemFlow(Maincontainer frame, Path evidence) throws Exception {
@@ -80,33 +93,29 @@ public final class DesktopSmoke {
 
         frame.exitStartEnterGame("Item");
         Gamepanel game = (Gamepanel) field(frame, "gamePanel");
-        Board board = (Board) field(game, "board");
-        board.timer.stop();
-        ExistingFeatureFixture.invoke(board, "eraseCurr");
-        CrossBlock current = new CrossBlock();
-        CrossBlock preview = new CrossBlock();
-        ExistingFeatureFixture.set(board, "curr", current);
-        ExistingFeatureFixture.set(board, "next", preview);
-        ExistingFeatureFixture.set(board, "erasedLineNum", 9);
-        board.x = 4;
-        board.y = 18;
-        ExistingFeatureFixture.invoke(board, "placeBlock");
-        game.drawNextBoard(preview);
+        GameController controller = game.controller();
+        controller.timer().stop();
+        var setup = new GameEngineFixture(controller.engine());
+        setup.seed(new CrossBlock(), new CrossBlock(), 4, 18);
+        setup.progress(0, 9, 1);
+        controller.refreshSnapshot();
+        var preview = controller.snapshot().next();
 
         key(game, KeyEvent.VK_B);
+        awaitEffect(game);
 
-        check(board.getScore() == 300,
+        check(controller.snapshot().score() == 300,
             "saved B hard-drop key must lock P and score its two rows");
-        check((int) field(board, "erasedLineNum") == 11,
+        check(controller.snapshot().clearedLines() == 11,
             "saved-key P lock must cross the ten-row supply boundary");
-        check(field(board, "curr") == preview,
+        check(controller.snapshot().current().equals(preview),
             "saved-key P lock must advance the preview once");
-        check(field(board, "next") instanceof ItemBlock,
+        check(java.util.Set.of("Row", "Column", "Anchor", "Bomb", "Cross").contains(controller.snapshot().next().kind()),
             "saved-key P lock must supply the earned item preview");
         capture(frame, evidence.resolve("final-saved-key-p-lock.png"));
 
-        board.timer.stop();
-        board.timer = null;
+        controller.timer().stop();
+
         game.gameOver();
         key(game, KeyEvent.VK_ENTER);
         Scoreboardpanel scoreboard = (Scoreboardpanel) field(frame, "scoreboardPanel");
@@ -149,15 +158,15 @@ public final class DesktopSmoke {
 
         frame.exitStartEnterGame(mode);
         Gamepanel game = (Gamepanel) field(frame, "gamePanel");
-        Board board = (Board) field(game, "board");
-        board.timer.stop();
-        int originalY = board.y;
+        GameController controller = game.controller();
+        controller.timer().stop();
+        int originalY = controller.snapshot().y();
         key(game, Maincontainer.DOWN);
-        check(board.y == originalY + 1 && board.getScore() == 1,
+        check(controller.snapshot().y() == originalY + 1 && controller.snapshot().score() == 1,
             palette + " representative game must accept synthetic movement");
         capture(frame, evidence.resolve(screenshot));
         key(game, KeyEvent.VK_ESCAPE);
-        check(game.getParent() == null && board.timer == null,
+        check(game.getParent() == null && !controller.timer().isRunning(),
             palette + " representative game must cleanly return to the menu");
     }
 
@@ -178,21 +187,21 @@ public final class DesktopSmoke {
                 for (int turn = 0; turn < 40; turn++) key(start, KeyEvent.VK_DOWN);
                 key(start, KeyEvent.VK_ENTER); // 40 is a multiple of the five menu choices.
                 Gamepanel game = (Gamepanel) field(frame, "gamePanel");
-                Board board = (Board) field(game, "board");
-                board.timer.stop();
-                int originalY = board.y;
+                GameController controller = game.controller();
+                controller.timer().stop();
+                int originalY = controller.snapshot().y();
                 for (int turn = 0; turn < 5; turn++) key(game, Maincontainer.DOWN);
-                check(board.y == originalY + 5 && board.getScore() == 5,
+                check(controller.snapshot().y() == originalY + 5 && controller.snapshot().score() == 5,
                     "repeated down input must move and score once per event");
                 key(game, Maincontainer.PAUSE);
-                int pausedY = board.y;
+                int pausedY = controller.snapshot().y();
                 for (int turn = 0; turn < 20; turn++) key(game, Maincontainer.DOWN);
-                check(board.y == pausedY && board.getIsPaused(), "pause must block repeated movement");
+                check(controller.snapshot().y() == pausedY && controller.snapshot().paused(), "pause must block repeated movement");
                 key(game, Maincontainer.PAUSE);
-                board.timer.stop();
-                check(!board.getIsPaused(), "pause key must resume the game");
+                controller.timer().stop();
+                check(!controller.snapshot().paused(), "pause key must resume the game");
                 key(game, KeyEvent.VK_ESCAPE);
-                check(game.getParent() == null && board.timer == null, "active game exit must remove game and timer");
+                check(game.getParent() == null && !controller.timer().isRunning(), "active game exit must remove game and timer");
 
                 crossItemFlow(frame, evidence);
 
@@ -220,10 +229,11 @@ public final class DesktopSmoke {
                 check(scoreboard.getParent() == null, "scoreboard must return to menu");
                 frame.exitStartEnterGame();
                 game = (Gamepanel) field(frame, "gamePanel");
-                board = (Board) field(game, "board");
-                board.timer.stop();
-                board.timer = null;
-                board.addScore(321);
+                controller = game.controller();
+                controller.timer().stop();
+
+                new GameEngineFixture(controller.engine()).progress(321, 0, 1);
+                controller.refreshSnapshot();
                 game.gameOver();
                 key(game, KeyEvent.VK_ENTER);
                 scoreboard = (Scoreboardpanel) field(frame, "scoreboardPanel");
@@ -237,9 +247,9 @@ public final class DesktopSmoke {
                 }
                 frame.exitStartEnterGame();
                 game = (Gamepanel) field(frame, "gamePanel");
-                board = (Board) field(game, "board");
-                board.timer.stop();
-                board.timer = null;
+                controller = game.controller();
+                controller.timer().stop();
+
                 game.gameOver();
                 scoreboard = (Scoreboardpanel) field(frame, "scoreboardPanel");
                 check(scoreboard.isShowing() && game.getParent() == null,
@@ -249,10 +259,11 @@ public final class DesktopSmoke {
                 key(scoreboard, KeyEvent.VK_ENTER);
                 frame.exitStartEnterGame("Item");
                 game = (Gamepanel) field(frame, "gamePanel");
-                board = (Board) field(game, "board");
-                board.timer.stop();
-                board.timer = null;
-                board.addScore(111);
+                controller = game.controller();
+                controller.timer().stop();
+
+                new GameEngineFixture(controller.engine()).progress(111, 0, 1);
+                controller.refreshSnapshot();
                 game.gameOver();
                 key(game, KeyEvent.VK_ENTER);
                 scoreboard = (Scoreboardpanel) field(frame, "scoreboardPanel");
@@ -331,9 +342,8 @@ public final class DesktopSmoke {
                     try {
                         Gamepanel game = (Gamepanel) field(frame, "gamePanel");
                         if (game != null) {
-                            Board board = (Board) field(game, "board");
-                            if (board.timer != null) board.timer.stop();
-                            board.stopAnimations();
+                            GameController controller = game.controller();
+                            game.stopGame();
                         }
                     } catch (ReflectiveOperationException ignored) { }
                 }
