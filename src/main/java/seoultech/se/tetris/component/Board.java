@@ -81,8 +81,7 @@ public class Board extends JComponent {
 		timer = new Timer(initInterval, new ActionListener() {			
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				moveDown();
-				drawBoard();
+				gamepanel.automaticDrop();
 			}
 		});
 		

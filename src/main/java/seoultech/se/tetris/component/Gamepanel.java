@@ -148,10 +148,25 @@ public class Gamepanel extends JPanel{
     private void updateMatchClock() {
         long seconds = matchClock.remainingSeconds();
         timeLabel.setText(String.format("Time %02d:%02d", seconds / 60, seconds % 60));
-        if (matchClock.isExpired()) {
-            battleEvents.timeExpired(board.getScore());
-            gameOver("Time Up");
-        }
+        finishIfTimeExpired();
+    }
+
+    /**
+     * Finalizes a timed match before an input or automatic drop can mutate it.
+     * The display timer is deliberately not the authority for the deadline: an
+     * input event may be dequeued before its next 100 ms tick.
+     */
+    boolean finishIfTimeExpired() {
+        if (resultFinalized || matchClock == null || !matchClock.isExpired()) return resultFinalized;
+        battleEvents.timeExpired(board.getScore());
+        gameOver("Time Up");
+        return true;
+    }
+
+    void automaticDrop() {
+        if (finishIfTimeExpired()) return;
+        board.moveDown();
+        board.drawBoard();
     }
 
     void publishScore(int score) { battleEvents.scoreChanged(score); }

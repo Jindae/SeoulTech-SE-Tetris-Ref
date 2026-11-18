@@ -44,6 +44,7 @@ public final class GameController {
 
     void handleKey(int keyCode) {
         if (!started || stopped) return;
+        if (gamepanel.finishIfTimeExpired()) return;
         if (board.getIsPaused()) {
             if (keyCode == KeyEvent.VK_ENTER) {
                 exitToMenu();
@@ -74,6 +75,7 @@ public final class GameController {
 
     void dispatch(GameCommand command) {
         if (!started || stopped) return;
+        if (gamepanel.finishIfTimeExpired()) return;
         switch (java.util.Objects.requireNonNull(command, "command")) {
             case LEFT -> board.moveLeft();
             case RIGHT -> board.moveRight();
