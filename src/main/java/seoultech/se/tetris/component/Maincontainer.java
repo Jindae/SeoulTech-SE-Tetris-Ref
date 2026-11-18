@@ -144,6 +144,11 @@ public class Maincontainer extends JFrame{
         mainPanel.setOpaque(true);
         add(mainPanel); // container에 mainPanel 추가
         pack();
+        // Window.pack() may clamp the outer window to the usable screen bounds.
+        // The configured dimensions describe the content area, so restore that
+        // contract explicitly after pack() has created the native peer/insets.
+        Insets insets = getInsets();
+        setSize(WIDTH + insets.left + insets.right, HEIGHT + insets.top + insets.bottom);
         setVisible(true);
     }
 
