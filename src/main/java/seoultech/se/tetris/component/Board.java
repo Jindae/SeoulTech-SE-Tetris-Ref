@@ -344,9 +344,9 @@ public class Board extends JComponent {
 	protected void eraseLine() {
         BitSet fullRows = completedRows();
         if (fullRows.isEmpty()) return;
-        var attack = gamepanel != null && gamepanel.getGameMode() == GameMode.CLASSIC
-            ? AttackRules.fromNormalClear(board, fullRows, curr, x, y)
-            : java.util.Optional.<AttackEvent>empty();
+        var attack = curr instanceof ItemBlock
+            ? java.util.Optional.<AttackEvent>empty()
+            : AttackRules.fromNormalClear(board, fullRows, curr, x, y);
         animateClearedRows(fullRows);
         removeRows(fullRows);
         attack.ifPresent(attackSink);
