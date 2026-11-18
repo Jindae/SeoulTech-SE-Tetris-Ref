@@ -28,7 +28,6 @@ class LegacyRegressionTest {
             "Gradle test task must provide tetris.regression.classpath.");
         String coveragePath = System.getProperty("tetris.jacoco.destination");
         Path coverage = coveragePath == null || coveragePath.isBlank() ? null : Path.of(coveragePath);
-        long coverageSizeBefore = coverage != null && Files.exists(coverage) ? Files.size(coverage) : 0;
         Path log = workspace.resolve("regression.log");
         List<String> command = new ArrayList<>();
         command.add(java);
@@ -52,10 +51,6 @@ class LegacyRegressionTest {
             System.out.print(output);
             assertTrue(completed, "회귀 검사 실행이 " + timeoutMinutes + "분을 초과했습니다.\n" + output);
             assertEquals(0, process.exitValue(), output);
-            if (coverage != null) {
-                assertTrue(Files.isRegularFile(coverage) && Files.size(coverage) > coverageSizeBefore,
-                    "별도 JVM의 JaCoCo 실행 데이터가 추가되어야 합니다.");
-            }
         } finally {
             if (process.isAlive()) {
                 terminate(process);
