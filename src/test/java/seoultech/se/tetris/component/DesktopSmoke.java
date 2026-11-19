@@ -149,9 +149,7 @@ public final class DesktopSmoke {
         check(frame.getConfiguredHeight() == Integer.parseInt(dimensions[0])
                 && frame.getConfiguredWidth() == Integer.parseInt(dimensions[1]),
             "actual frame must apply configured size " + size);
-        check(frame.getContentPane().getHeight() == Integer.parseInt(dimensions[0])
-                && frame.getContentPane().getWidth() == Integer.parseInt(dimensions[1]),
-            "rendered content must use configured size " + size);
+        awaitContentSize(frame, new java.awt.Dimension(frame.getConfiguredWidth(), frame.getConfiguredHeight()));
         check(frame.setting.getColorPalette().equals(palette)
                 && Maincontainer.colorPalette.equals(palette),
             "actual frame must apply configured palette " + palette);
@@ -168,6 +166,28 @@ public final class DesktopSmoke {
         key(game, KeyEvent.VK_ESCAPE);
         check(game.getParent() == null && !controller.timer().isRunning(),
             palette + " representative game must cleanly return to the menu");
+    }
+
+    // On Windows a visible peer can deliver the resize after the settings action returns.
+    private static void awaitContentSize(JFrame frame, java.awt.Dimension expected) {
+        var content = frame.getContentPane();
+        var initial = content.getSize();
+        if (!initial.equals(expected)) {
+            var loop = java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
+            long deadline = System.nanoTime() + 2_000_000_000L;
+            var poll = new javax.swing.Timer(20, event -> {
+                if (content.getSize().equals(expected) || System.nanoTime() >= deadline) loop.exit();
+            });
+            poll.start();
+            try { loop.enter(); } finally { poll.stop(); }
+        }
+        var gc = frame.getGraphicsConfiguration();
+        String geometry = "expected=" + expected + ", initial=" + initial + ", settled=" + content.getSize()
+            + ", frame=" + frame.getBounds() + ", decorations=" + frame.getInsets()
+            + ", display=" + gc.getBounds() + ", screenInsets=" + frame.getToolkit().getScreenInsets(gc)
+            + ", transform=" + gc.getDefaultTransform();
+        System.out.println("Desktop resize: " + geometry);
+        check(content.getSize().equals(expected), "rendered content must use configured size: " + geometry);
     }
 
     public static void main(String[] args) throws Exception {
