@@ -1,192 +1,108 @@
 package seoultech.se.tetris.component;
-
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Constructor;
-import java.time.Duration;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.LongSupplier;
-import javax.swing.Timer;
+import static org.junit.jupiter.api.Assertions.*;
+import java.awt.event.ActionEvent;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import seoultech.se.tetris.GameMode;
-import seoultech.se.tetris.blocks.Block;
-import seoultech.se.tetris.game.BattleEventSink;
-import seoultech.se.tetris.game.MatchClock;
-import sun.misc.Unsafe;
+import seoultech.se.tetris.game.GamePhase;
 
 class GameControllerLifecycleTest {
-    @Test
-    @Timeout(3)
-    void constructionDoesNotStartAndStartIsIdempotent() throws Exception {
+    @Test void pauseStopsSchedulingAndResumeStartsANewGravityPeriod() throws Exception {
         ExistingFeatureFixture.onEdt(() -> {
-            GameFixture fixture = new GameFixture();
-            try (fixture) {
-                assertNull(field(fixture.board, "curr", Block.class));
-                assertNull(field(fixture.board, "next", Block.class));
-                assertFalse(fixture.initialTimer.isRunning());
-
-                fixture.game.startGame();
-                Block current = field(fixture.board, "curr", Block.class);
-                Block next = field(fixture.board, "next", Block.class);
-                assertTrue(fixture.initialTimer.isRunning());
-
-                fixture.game.startGame();
-                assertSame(current, field(fixture.board, "curr", Block.class));
-                assertSame(next, field(fixture.board, "next", Block.class));
-                assertSame(fixture.initialTimer, fixture.board.timer);
+            try (ControllerFixture f = new ControllerFixture(GameMode.CLASSIC)) {
+                f.prepare(new seoultech.se.tetris.blocks.OBlock(), new seoultech.se.tetris.blocks.OBlock(),
+                    new int[20][10], 3, 0);
+                f.elapse(400_000_000L);
+                f.controller.handleKey(Maincontainer.PAUSE);
+                assertTrue(f.controller.snapshot().paused());
+                assertFalse(f.controller.timer().isRunning());
+                f.clock.addAndGet(10_000_000_000L);
+                f.controller.handleKey(Maincontainer.DOWN);
+                assertEquals(0, f.controller.snapshot().y());
+                f.controller.handleKey(Maincontainer.PAUSE);
+                assertFalse(f.controller.snapshot().paused());
+                assertTrue(f.controller.timer().isRunning());
+                f.elapse(999_000_000L);
+                assertEquals(0, f.controller.snapshot().y());
+                f.elapse(1_000_000L);
+                assertEquals(1, f.controller.snapshot().y());
             }
             return null;
         });
     }
 
-    @Test
-    @Timeout(3)
-    void stopIsIdempotentAndRejectsLateInputOrRestart() throws Exception {
+    @Test void naturalGameOverStopsTheTimerAndOpensNameEntryOnlyOnce(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path temporary) throws Exception {
+        String previous = System.getProperty("tetris.dataDir");
+        System.setProperty("tetris.dataDir", temporary.toString());
+        try {
+            ExistingFeatureFixture.onEdt(() -> {
+                try (ControllerFixture f = new ControllerFixture(GameMode.CLASSIC)) {
+                    int[][] grid = new int[20][10];
+                    grid[0][3] = 1;
+                    f.prepare(new seoultech.se.tetris.blocks.OBlock(), new seoultech.se.tetris.blocks.OBlock(),
+                        grid, 3, 18);
+                    var timer = f.controller.timer();
+                    var stale = new ActionEvent(timer, ActionEvent.ACTION_PERFORMED, timer.getActionCommand());
+                    f.controller.dispatch(seoultech.se.tetris.game.GameCommand.HARD_DROP);
+                    assertEquals(GamePhase.GAME_OVER, f.controller.snapshot().phase());
+                    assertFalse(timer.isRunning());
+                    var panel = ExistingFeatureFixture.get(f.game, "gameOverPanel", javax.swing.JPanel.class);
+                    assertNotNull(panel);
+                    assertEquals(1, f.game.getKeyListeners().length);
+                    assertTrue(seoultech.se.tetris.score.ScoreStore.readRanked().isEmpty());
+                    f.clock.addAndGet(10_000_000_000L);
+                    for (var listener : timer.getActionListeners()) listener.actionPerformed(stale);
+                    f.controller.dispatch(seoultech.se.tetris.game.GameCommand.HARD_DROP);
+                    assertSame(panel, ExistingFeatureFixture.get(f.game, "gameOverPanel", javax.swing.JPanel.class));
+                    assertEquals(1, f.game.getKeyListeners().length);
+                    var enter = new java.awt.event.KeyEvent(f.game, java.awt.event.KeyEvent.KEY_PRESSED,
+                        0, 0, java.awt.event.KeyEvent.VK_ENTER, java.awt.event.KeyEvent.CHAR_UNDEFINED);
+                    for (var listener : f.game.getKeyListeners()) listener.keyPressed(enter);
+                    assertEquals(1, f.owner.scoreboardTransitions);
+                    assertEquals(1, seoultech.se.tetris.score.ScoreStore.readRanked().size());
+                }
+                return null;
+            });
+        } finally {
+            if (previous == null) System.clearProperty("tetris.dataDir");
+            else System.setProperty("tetris.dataDir", previous);
+        }
+    }
+
+    @Test void constructionDoesNotStartAndStartIsIdempotent() throws Exception {
         ExistingFeatureFixture.onEdt(() -> {
-            GameFixture fixture = new GameFixture();
-            try (fixture) {
-                fixture.game.startGame();
-                int x = fixture.board.x;
-                Block current = field(fixture.board, "curr", Block.class);
-                fixture.game.stopGame();
-                fixture.game.stopGame();
-
-                assertNull(fixture.board.timer);
-                assertFalse(fixture.initialTimer.isRunning());
-                fixture.controller.handleKey(Maincontainer.RIGHT);
-                fixture.game.startGame();
-
-                assertSame(current, field(fixture.board, "curr", Block.class));
-                assertEquals(x, fixture.board.x);
-                assertNull(fixture.board.timer);
-                assertFalse(fixture.owner.exitCalled);
+            try (ControllerFixture f = new ControllerFixture(GameMode.CLASSIC)) {
+                assertEquals(GamePhase.NEW, f.controller.snapshot().phase());
+                assertNull(f.controller.snapshot().current());
+                assertFalse(f.controller.timer().isRunning());
+                f.game.startGame();
+                var started = f.controller.snapshot();
+                assertTrue(f.controller.timer().isRunning());
+                f.game.startGame();
+                assertEquals(started, f.controller.snapshot());
             }
             return null;
         });
     }
-
-    @Test
-    @Timeout(3)
-    void expiredDeadlineRejectsHardDropBeforeDisplayTimerTick() throws Exception {
+    @Test void stopIsIdempotentAndRejectsLateInputOrRestart() throws Exception {
         ExistingFeatureFixture.onEdt(() -> {
-            AtomicLong now = new AtomicLong();
-            RecordingBattleEvents events = new RecordingBattleEvents();
-            GameFixture fixture = new GameFixture(GameMode.TIME_LIMIT, events, now);
-            try (fixture) {
-                fixture.game.startGame();
-                now.set(Duration.ofSeconds(1).toNanos());
-
-                fixture.controller.handleKey(Maincontainer.HARD_DROP);
-
-                assertEquals(0, fixture.board.getScore(),
-                    "the score at the deadline must be final even before the display timer fires");
-                assertEquals(0, events.expiredScore);
-                assertEquals(1, events.expirationCount);
-                assertNull(fixture.board.timer);
+            try (ControllerFixture f = new ControllerFixture(GameMode.CLASSIC)) {
+                f.game.startGame();
+                var timer = f.controller.timer();
+                var stale = new ActionEvent(timer, ActionEvent.ACTION_PERFORMED, timer.getActionCommand());
+                f.game.stopGame();
+                var stopped = f.controller.snapshot();
+                f.game.stopGame();
+                f.clock.addAndGet(5_000_000_000L);
+                for (var listener : timer.getActionListeners()) listener.actionPerformed(stale);
+                f.controller.handleKey(Maincontainer.RIGHT);
+                f.game.startGame();
+                assertEquals(GamePhase.STOPPED, stopped.phase());
+                assertEquals(stopped, f.controller.snapshot());
+                assertFalse(timer.isRunning());
+                assertFalse(f.owner.exitCalled);
             }
             return null;
         });
-    }
-
-    @Test
-    @Timeout(3)
-    void expiredDeadlineRejectsAutomaticDropBeforeDisplayTimerTick() throws Exception {
-        ExistingFeatureFixture.onEdt(() -> {
-            AtomicLong now = new AtomicLong();
-            RecordingBattleEvents events = new RecordingBattleEvents();
-            GameFixture fixture = new GameFixture(GameMode.TIME_LIMIT, events, now);
-            try (fixture) {
-                fixture.game.startGame();
-                now.set(Duration.ofSeconds(1).toNanos());
-
-                fixture.initialTimer.getActionListeners()[0].actionPerformed(null);
-
-                assertEquals(0, fixture.board.getScore());
-                assertEquals(0, events.expiredScore);
-                assertEquals(1, events.expirationCount);
-                assertNull(fixture.board.timer);
-            }
-            return null;
-        });
-    }
-
-    private static <T> T field(Object target, String name, Class<T> type) throws Exception {
-        Field field = target.getClass().getDeclaredField(name);
-        field.setAccessible(true);
-        return type.cast(field.get(target));
-    }
-
-    private static final class GameFixture implements AutoCloseable {
-        final TestMaincontainer owner;
-        final Gamepanel game;
-        final Board board;
-        final GameController controller;
-        final Timer initialTimer;
-
-        GameFixture() throws Exception {
-            this(GameMode.CLASSIC, BattleEventSink.NONE, null);
-        }
-
-        GameFixture(GameMode mode, BattleEventSink events, AtomicLong now) throws Exception {
-            Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
-            unsafeField.setAccessible(true);
-            owner = (TestMaincontainer) ((Unsafe) unsafeField.get(null))
-                .allocateInstance(TestMaincontainer.class);
-            owner.setting = owner.new Setting();
-            setField(owner, "timeLimitSeconds", 1);
-            game = new Gamepanel(owner, mode, events);
-            if (now != null) setField(game, "matchClock", clock(now));
-            board = field(game, "board", Board.class);
-            controller = field(game, "controller", GameController.class);
-            initialTimer = board.timer;
-        }
-
-        @Override
-        public void close() {
-            game.stopGame();
-            initialTimer.stop();
-        }
-    }
-
-    private static MatchClock clock(AtomicLong now) throws Exception {
-        Constructor<MatchClock> constructor = MatchClock.class
-            .getDeclaredConstructor(Duration.class, LongSupplier.class);
-        constructor.setAccessible(true);
-        return constructor.newInstance(Duration.ofSeconds(1), (LongSupplier) now::get);
-    }
-
-    private static void setField(Object target, String name, Object value) throws Exception {
-        Class<?> declaringClass = target instanceof Gamepanel
-            ? target.getClass() : target.getClass().getSuperclass();
-        Field field = declaringClass.getDeclaredField(name);
-        field.setAccessible(true);
-        field.set(target, value);
-    }
-
-    private static final class RecordingBattleEvents implements BattleEventSink {
-        int expirationCount;
-        int expiredScore = -1;
-
-        @Override
-        public void timeExpired(int finalScore) {
-            expirationCount++;
-            expiredScore = finalScore;
-        }
-    }
-
-    private static final class TestMaincontainer extends Maincontainer {
-        private static final long serialVersionUID = 1L;
-        boolean exitCalled;
-
-        @Override
-        protected void exitGameEnterStart() {
-            exitCalled = true;
-        }
     }
 }

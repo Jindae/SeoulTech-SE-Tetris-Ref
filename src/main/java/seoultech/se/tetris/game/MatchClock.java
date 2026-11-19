@@ -15,7 +15,7 @@ public final class MatchClock {
         this(duration, System::nanoTime);
     }
 
-    MatchClock(Duration duration, LongSupplier nanoTime) {
+    public MatchClock(Duration duration, LongSupplier nanoTime) {
         Objects.requireNonNull(duration, "duration");
         if (duration.isZero() || duration.isNegative()) {
             throw new IllegalArgumentException("duration must be positive");
@@ -39,7 +39,7 @@ public final class MatchClock {
         return remaining == 0 ? 0 : Math.addExact(remaining, 999_999_999L) / 1_000_000_000L;
     }
 
-    private long remainingNanos() {
+    public long remainingNanos() {
         if (!started) return durationNanos;
         return Math.max(0, deadlineNanos - nanoTime.getAsLong());
     }
