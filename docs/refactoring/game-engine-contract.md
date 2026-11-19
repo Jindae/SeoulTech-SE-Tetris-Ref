@@ -2,7 +2,7 @@
 
 기준 코드: `695e725898ca081ec0b79a138b2f2c87e7de460e` · 작성: 2026-10-31
 
-RF-01의 계약을 RF-03~06에 적용하고, #34에서 공격 입출력 경계를 추가했다. 실제 2인 대전 조정과 P2P 규격은 후속 범위다. 현재 구조는 [구현 안내](README.md), 단계별 결과는 [전달 계획](delivery-plan.md)에서 확인한다.
+RF-01의 계약을 RF-03~06에 적용하고, #34·#35에서 공격 입출력과 Controller의 시간·종료 이벤트 경계를 추가했다. 실제 2인 대전 조정과 P2P 규격은 후속 범위다. 현재 구조는 [구현 안내](README.md), 단계별 결과는 [전달 계획](delivery-plan.md)에서 확인한다.
 
 ## 1. 호출과 소유권
 
@@ -20,7 +20,7 @@ GameSnapshot snapshot();
 
 | 계약 | 고정할 내용 |
 |---|---|
-| GameConfig | 기존 GameMode(CLASSIC/ITEM), Difficulty. 화면·키·저장소 설정은 제외 |
+| GameConfig | GameMode(CLASSIC/ITEM/TIME_LIMIT), Difficulty. 화면·키·저장소 설정은 제외. 제한시간은 Controller의 MatchClock이 관리 |
 | GameCommand | LEFT, RIGHT, ROTATE, SOFT_DROP, HARD_DROP, TOGGLE_PAUSE |
 | GameState | 엔진 내부만 수정. 고정 셀과 현재 블록 분리, public setter 없음 |
 | BlockSource | nextBlock(Difficulty), nextItemBlock(). 운영은 기존 Generator 호출, 각 엔진에 독립 인스턴스·새 Block 공급 |
@@ -92,6 +92,10 @@ ACTIVE일 때만 current와 ghost를 별도 합성한다. 고정 뒤에는 해�
 advance는 음수를 거부하고 0에서는 변화가 없다. 지연된 호출 한 번에 중력 또는 아이템 프레임을 최대 한 번 진행하고 초과 주기를 버린다. 새 효과·다음 블록에 같은 경과시간을 재사용하지 않는다. 하이라이트는 실제 누적 경과시간으로 끝낸다.
 
 입력 때는 직전 시점부터 시간을 한 번 정산하고 명령을 처리한다. 메뉴 종료는 정산 없이 즉시 stop한다. pause/resume와 시간 기반 아이템 효과 전후에는 중력 대기시간을 새 간격으로 시작한다. 일반 수동 고정은 이미 지난 중력 시간을 유지한다. 키 우선순위·이름 입력·순위 판단·기록 저장 시점은 기존 Gamepanel 흐름을 유지한다.
+
+TIME_LIMIT의 Controller와 MatchClock은 같은 단조 시계를 사용한다. 시간 정산에 사용한 시각으로 먼저 만료를 확인하고, 입력 처리 직전에도 현재 시각을 다시 확인한다. 만료라면 엔진을 stop하고 `timeExpired(finalScore)`를 한 번 발행한다. 자연 종료는 `localTopOut(finalScore)`를 한 번 발행하며, 명시적인 메뉴 이탈에서는 두 결과 이벤트를 발행하지 않는다. 제한시간은 pause 중에도 진행한다. 이 정책과 임시 1인 화면은 이후 PDF 기준 대전 통합 시 검토한다.
+
+Controller의 `BattleEventSink`는 점수 변경과 일반 완성 줄 수를 알린다. 실제 공격 행 데이터는 별도의 `LockResolution.attack`에서 받는다. 한 고정 결과의 줄 삭제 이벤트와 공격을 각각 한 번 발행한 뒤 `continueAfterLock`을 호출한다. MatchJudge에 두 플레이어의 최종 상태를 모아 전달하는 조정 계층과 P2P 전송은 아직 포함하지 않는다.
 
 ## 5. 다음 단계 연결
 

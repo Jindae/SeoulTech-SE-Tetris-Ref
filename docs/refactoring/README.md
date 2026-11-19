@@ -11,8 +11,8 @@ Classic/Item 1인 게임을 담당하는 Java Swing 프로젝트다. 이번 리�
 | 개발 시작 기준 | 최신 원격 `main`에서 기능 브랜치 생성 |
 | 구현 완료 시점 기록 | `b58a33b` — RF-06 구현·검증 완료 시점. 후속 MENU 입력 진단은 [별도 검증 기록](native-focus-fix.md) 참고 |
 | 단계별 브랜치 | RF-01·02 → RF-03·04 → RF-05·06 순서로 누적 |
-| 통합 기록 | RF-01~06은 #36으로 `main` 통합. #34의 공격 기능도 새 엔진 경계로 이전 |
-| 구현 범위 | Classic/Item 1인 게임, 엔진 독립 실행, 공격 생성·수신 대기열·턴 경계 적용 |
+| 통합 기록 | RF-01~06은 #36으로 `main` 통합. #34·#35의 공격·시간제한도 새 Engine·Controller 경계로 이전 |
+| 구현 범위 | Classic/Item 1인 게임, 엔진 독립 실행, 공격 규칙, 임시 시간제한 모드·종료 이벤트 |
 | 다음 개발 범위 | 실제 2인 대전 연결·P2P·재대전·연결 장애 처리 |
 
 예전 기능 브랜치는 최신 `main`을 먼저 합친다. 충돌을 해결할 때 Board의 옛 게임 규칙을 되살리지 않고, 아래 Engine·Controller·View 경계에 기능을 연결한다.
@@ -47,6 +47,8 @@ flowchart LR
 | 이동·회전·충돌·점수·줄 삭제 수정 | [GameEngine](../../src/main/java/seoultech/se/tetris/game/GameEngine.java)의 `handle`, `moveHorizontal`, `lockCurrent`, `removeRows`와 기존 `CollisionRules` | [GameEngineCoreTest](../../src/test/java/seoultech/se/tetris/game/GameEngineCoreTest.java), [GameEngineParityTest](../../src/test/java/seoultech/se/tetris/game/GameEngineParityTest.java) |
 | 아이템 효과·공급 수정 | [GameEngine](../../src/main/java/seoultech/se/tetris/game/GameEngine.java)의 `lockCurrent`, `advanceItemEffect`, `continueAfterLock`, [ItemEffectState](../../src/main/java/seoultech/se/tetris/game/ItemEffectState.java) | [GameEngineItemTest](../../src/test/java/seoultech/se/tetris/game/GameEngineItemTest.java), [GameEngineEffectTest](../../src/test/java/seoultech/se/tetris/game/GameEngineEffectTest.java) |
 | 입력 연결·타이머·시작·종료 수정 | [GameController](../../src/main/java/seoultech/se/tetris/component/GameController.java)의 `handleKey`, `dispatch`, `start`, `stop` | [GameControllerLifecycleTest](../../src/test/java/seoultech/se/tetris/component/GameControllerLifecycleTest.java), [GameControllerTimingTest](../../src/test/java/seoultech/se/tetris/component/GameControllerTimingTest.java) |
+| 공격 생성·수신·적용 수정 | [AttackRules](../../src/main/java/seoultech/se/tetris/attack/AttackRules.java), `GameEngine.receiveAttack`·`continueAfterLock` | [GameEngineAttackTest](../../src/test/java/seoultech/se/tetris/game/GameEngineAttackTest.java), [GameControllerAttackTest](../../src/test/java/seoultech/se/tetris/component/GameControllerAttackTest.java) |
+| 시간제한·점수·종료 이벤트 수정 | [MatchClock](../../src/main/java/seoultech/se/tetris/game/MatchClock.java), `GameController`의 `advanceToNow`·`expireIfNeeded`·`consume` | [GameControllerTimeLimitTest](../../src/test/java/seoultech/se/tetris/component/GameControllerTimeLimitTest.java), [MatchJudgeTest](../../src/test/java/seoultech/se/tetris/game/MatchJudgeTest.java) |
 | 보드·고스트·효과의 모양 수정 | [Board](../../src/main/java/seoultech/se/tetris/component/Board.java)의 `paintComponent`, `drawGhost`, `drawEffect` | [BoardRenderingTest](../../src/test/java/seoultech/se/tetris/component/BoardRenderingTest.java) |
 | 다음 블록·점수·일시정지·이름 입력 UI 수정 | [Gamepanel](../../src/main/java/seoultech/se/tetris/component/Gamepanel.java), [Nextblockpanel](../../src/main/java/seoultech/se/tetris/component/Nextblockpanel.java) | 관련 component 테스트와 `desktopSmoke` |
 | 블록 공급 방식 수정 | [BlockSource](../../src/main/java/seoultech/se/tetris/game/BlockSource.java), [GeneratorBlockSource](../../src/main/java/seoultech/se/tetris/game/GeneratorBlockSource.java), 기존 `BlockGenerator` | [BlockGeneratorConsumptionTest](../../src/test/java/seoultech/se/tetris/blocks/BlockGeneratorConsumptionTest.java), [GameEngineIsolationTest](../../src/test/java/seoultech/se/tetris/game/GameEngineIsolationTest.java) |
@@ -100,9 +102,11 @@ flowchart LR
 
 테스트 결과는 `build/reports/tests/test/index.html`, 커버리지는 `build/reports/jacoco/test/html/index.html`에서 확인한다. `check`의 Line Coverage 기준은 70%다.
 
+**#34·#35 통합 검증(2026-11-19, macOS):** JUnit 180개 통과, Line Coverage 90.67%, `check build desktopSmoke packageRelease` 통과. 공격·줄 삭제 이벤트의 세 모드 연결과 마감 경계 회귀를 포함한다. Windows의 기존 창 크기 검사 실패는 #37에서 별도로 추적하며, 이번 통합으로 해결했다고 주장하지 않는다.
+
 **RF-06 마지막 검증 기록:** JUnit 153개 통과, 별도 JVM UI·설정·저장 검사 33개 통과, Line Coverage 90.59%, 빌드·desktopSmoke·합성 입력 포커스 검사 통과. 이는 당시 결과이며 기능 수정 후에는 다시 검사한다.
 
-**최신 검증:** JUnit 154개와 빌드, native 전체 검사(시작·설정·Classic·Item·이름 입력·저장·점수판)가 통과했다. 효과를 확인하지 못한 입력기 설정 변경은 되돌렸고, 이전 클릭 실패의 원인은 미확정이다. [비교 결과·검증 기록](native-focus-fix.md)을 확인한다. `desktopFocusSmoke`를 인자 없이 실행하면 실제 마우스·키보드를 사용하므로 실행 시간을 사용자와 먼저 맞춘다. 위 `--args=swing` 검사는 별도 방식이다.
+**리팩토링 당시 최종 검증:** JUnit 154개와 빌드, native 전체 검사(시작·설정·Classic·Item·이름 입력·저장·점수판)가 통과했다. 효과를 확인하지 못한 입력기 설정 변경은 되돌렸고, 이전 클릭 실패의 원인은 미확정이다. [비교 결과·검증 기록](native-focus-fix.md)을 확인한다. `desktopFocusSmoke`를 인자 없이 실행하면 실제 마우스·키보드를 사용하므로 실행 시간을 사용자와 먼저 맞춘다. 위 `--args=swing` 검사는 별도 방식이다.
 
 ## 7. 대전 개발을 시작할 때
 
@@ -119,6 +123,10 @@ flowchart LR
 공격 행은 삭제 전 셀에서 방금 고정한 블록의 칸을 비워 만든다. 일반 줄 삭제가 2줄 이상일 때만 생성하며, Item 모드의 일반 블록도 포함한다. 아이템 효과 삭제의 공격 인정 정책은 아직 추가하지 않았다. `linesCleared` 숫자로 공격을 다시 만들지 말고 엔진이 반환한 `AttackEvent`를 사용한다.
 
 `handle`과 `advance` 양쪽에서 나온 고정 결과를 처리해야 한다. 각 결과의 공격은 한 번 전달하고 `continueAfterLock`도 한 번 호출한다. 세션 구분·네트워크 중복 수신 방지는 이후 대전·통신 계층의 책임이다.
+
+**시간·종료 이벤트:** `Gamepanel(..., BattleEventSink)`로 점수 변경·일반 줄 삭제·탑아웃·시간 만료를 받는다. 공격 모양은 위 `AttackEvent` 경로를 사용한다. Controller와 MatchClock은 같은 단조 시계를 쓰며 Swing 타이머는 하나다. 마감 이후 입력·자동 낙하는 막고, 메뉴 이탈은 결과 이벤트 없이 종료한다.
+
+**아직 연결되지 않은 부분:** `MatchJudge`는 전달받은 종료 원인·두 점수로 결과를 계산하는 순수 함수다. 두 엔진의 종료 시점·점수 수집과 승패 화면은 대전 조정 계층에서 연결해야 한다. 현재 TIME LIMIT 메뉴는 임시 1인 검증 경로이며 기존 이름 입력·기록 저장을 사용한다. 일시정지 중에도 제한시간은 흐른다. 이 임시 화면과 설정값을 최종 PDF 대전 요구사항의 완료로 보지 않는다.
 
 대전 조정 계층인 MatchEngine과 통신 계층은 후속 설계 대상이다. 현재 GameController는 Swing 화면을 직접 참조한다. 대전에서 재사용할 핵심은 GameEngine과 명령·상태 사본의 경계이며, 통신 방식과 대전 규칙은 PDF에 맞춰 별도로 확정한다. Snapshot JSON 예시는 표시 데이터 설명용이며 통신 프로토콜 구현은 아니다.
 
