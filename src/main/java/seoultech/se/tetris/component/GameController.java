@@ -2,16 +2,21 @@ package seoultech.se.tetris.component;
 
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import javax.swing.Timer;
 import seoultech.se.tetris.attack.AttackEvent;
+import seoultech.se.tetris.game.BattleEventSink;
+import seoultech.se.tetris.game.ClearBatch;
 import seoultech.se.tetris.game.GameCommand;
 import seoultech.se.tetris.game.GameEngine;
+import seoultech.se.tetris.game.GamePhase;
 import seoultech.se.tetris.game.GameSnapshot;
 import seoultech.se.tetris.game.GameUpdate;
+import seoultech.se.tetris.game.MatchClock;
 
 /** Serializes input, elapsed time, engine updates, and immutable UI publication on the EDT. */
 public final class GameController {
@@ -19,6 +24,8 @@ public final class GameController {
     private final Board board;
     private final GameEngine engine;
     private final LongSupplier clock;
+    private final MatchClock matchClock;
+    private final BattleEventSink battleEvents;
     private final Timer timer;
 
     private boolean started;
@@ -26,13 +33,18 @@ public final class GameController {
     private boolean gameOverPublished;
     private long lastAdvanceNanos;
     private long timerGeneration;
+    private int publishedScore;
     private Consumer<AttackEvent> attackSink = ignored -> {};
 
-    GameController(Gamepanel gamepanel, Board board, GameEngine engine, LongSupplier clock) {
+    GameController(Gamepanel gamepanel, Board board, GameEngine engine, LongSupplier clock,
+            MatchClock matchClock, BattleEventSink battleEvents) {
         this.gamepanel = Objects.requireNonNull(gamepanel, "gamepanel");
         this.board = Objects.requireNonNull(board, "board");
         this.engine = Objects.requireNonNull(engine, "engine");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.matchClock = matchClock;
+        this.battleEvents = Objects.requireNonNull(battleEvents, "battleEvents");
+        publishedScore = engine.snapshot().score();
         timer = new Timer(1, this::timerFired);
         timer.setRepeats(false);
         publish(engine.snapshot());
@@ -41,6 +53,7 @@ public final class GameController {
     void start() {
         if (started || stopped) return;
         started = true;
+        if (matchClock != null) matchClock.start();
         lastAdvanceNanos = clock.getAsLong();
         consume(engine.start(), true);
     }
@@ -91,6 +104,7 @@ public final class GameController {
         Objects.requireNonNull(command, "command");
         if (!started || stopped) return;
         if (advanceToNow(false)) return;
+        if (expireIfNeeded(clock.getAsLong())) return;
         consume(engine.handle(command), true);
     }
 
@@ -137,16 +151,18 @@ public final class GameController {
     /** Returns true when advancing ended or stopped the session. */
     private boolean advanceToNow(boolean schedule) {
         long now = clock.getAsLong();
+        if (expireIfNeeded(now)) return true;
         long elapsed = Math.max(0L, now - lastAdvanceNanos);
         lastAdvanceNanos = now;
         consume(engine.advance(elapsed), schedule);
-        return stopped || snapshot().phase() == seoultech.se.tetris.game.GamePhase.GAME_OVER;
+        return stopped || snapshot().phase() == GamePhase.GAME_OVER;
     }
 
     private void consume(GameUpdate update, boolean schedule) {
         GameUpdate displayed = Objects.requireNonNull(update, "update");
         if (displayed.lockResolution().isPresent()) {
             var resolution = displayed.lockResolution().orElseThrow();
+            publishCompletedLines(resolution.clearBatches());
             resolution.attack().ifPresent(attackSink);
             displayed = engine.continueAfterLock(resolution.turnId());
         }
@@ -154,6 +170,7 @@ public final class GameController {
         if (displayed.gameEnd().isPresent() && !gameOverPublished) {
             gameOverPublished = true;
             cancelTimer();
+            battleEvents.localTopOut(displayed.snapshot().score());
             gamepanel.gameOver();
             return;
         }
@@ -163,13 +180,23 @@ public final class GameController {
     private void publish(GameSnapshot snapshot) {
         board.showSnapshot(snapshot);
         gamepanel.showSnapshot(snapshot);
+        if (snapshot.score() != publishedScore) {
+            publishedScore = snapshot.score();
+            battleEvents.scoreChanged(publishedScore);
+        }
+        if (matchClock != null) gamepanel.showRemainingTime(matchClock.remainingSeconds());
     }
 
     private void schedule(OptionalLong wakeupNanos) {
         timer.stop();
         long generation = ++timerGeneration;
-        if (wakeupNanos.isEmpty() || stopped) return;
-        long nanos = wakeupNanos.orElseThrow();
+        if (stopped) return;
+        long nanos = wakeupNanos.orElse(Long.MAX_VALUE);
+        if (matchClock != null) {
+            nanos = Math.min(nanos, matchClock.remainingNanos());
+            nanos = Math.min(nanos, 1_000_000_000L);
+        }
+        if (nanos == Long.MAX_VALUE) return;
         long millis = Math.max(1L, (nanos + 999_999L) / 1_000_000L);
         int delay = millis > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) millis;
         timer.setActionCommand(Long.toString(generation));
@@ -181,6 +208,27 @@ public final class GameController {
         timer.stop();
         timerGeneration++;
         timer.setActionCommand(Long.toString(timerGeneration));
+    }
+
+    private boolean expireIfNeeded(long nowNanos) {
+        if (matchClock == null || !matchClock.isExpiredAt(nowNanos)) return false;
+        if (gameOverPublished || stopped) return true;
+        gameOverPublished = true;
+        stopped = true;
+        cancelTimer();
+        GameUpdate stoppedUpdate = engine.stop();
+        publish(stoppedUpdate.snapshot());
+        battleEvents.timeExpired(stoppedUpdate.snapshot().score());
+        gamepanel.gameOver("Time Up");
+        return true;
+    }
+
+    private void publishCompletedLines(List<ClearBatch> batches) {
+        int completedLines = batches.stream()
+            .filter(batch -> batch.cause() == ClearBatch.Cause.COMPLETED_ROWS)
+            .mapToInt(batch -> batch.rows().size())
+            .sum();
+        if (completedLines > 0) battleEvents.linesCleared(completedLines);
     }
 
     private static boolean isConfiguredGameKey(int keyCode) {

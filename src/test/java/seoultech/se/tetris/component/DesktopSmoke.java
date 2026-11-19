@@ -185,7 +185,8 @@ public final class DesktopSmoke {
                 check(frame.getContentPane().getWidth() > 0, "window must have a content area");
                 JPanel start = (JPanel) field(frame, "startPanel");
                 for (int turn = 0; turn < 40; turn++) key(start, KeyEvent.VK_DOWN);
-                key(start, KeyEvent.VK_ENTER); // 40 is a multiple of the five menu choices.
+                for (int turn = 0; turn < 40; turn++) key(start, KeyEvent.VK_UP);
+                key(start, KeyEvent.VK_ENTER); // Round trips remain on the first menu choice.
                 Gamepanel game = (Gamepanel) field(frame, "gamePanel");
                 GameController controller = game.controller();
                 controller.timer().stop();

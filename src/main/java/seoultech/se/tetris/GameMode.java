@@ -5,7 +5,8 @@ import java.util.Optional;
 
 public enum GameMode {
     CLASSIC("Classic"),
-    ITEM("Item");
+    ITEM("Item"),
+    TIME_LIMIT("Time Limit");
 
     private final String displayName;
 

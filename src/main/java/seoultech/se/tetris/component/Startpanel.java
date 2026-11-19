@@ -58,6 +58,13 @@ public class Startpanel extends JPanel{
             }
         };
         menu.add(buttonPanel, itemButton);
+        Button timeLimitButton = new Button("TIME LIMIT (TEMP)") {
+            @Override
+            protected void isPressed() {
+                Startpanel.this.maincontainer.exitStartEnterGame("Time Limit");
+            }
+        };
+        menu.add(buttonPanel, timeLimitButton);
         Button menuButton = new Button("MENU") {
             @Override
             protected void isPressed() {
