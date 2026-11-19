@@ -1,8 +1,8 @@
-# 게임 엔진 계약 — RF-01 기준
+# 게임 엔진 계약
 
 기준 코드: `695e725898ca081ec0b79a138b2f2c87e7de460e` · 작성: 2026-10-31
 
-RF-01에서 고정한 계약을 RF-03~06의 엔진과 화면에 적용했다. Classic/Item 1인 게임을 보존하기 위한 경계이며, 대전·공격·P2P 규격은 포함하지 않는다. 현재 구조는 [구현 안내](README.md), 단계별 결과는 [전달 계획](delivery-plan.md)에서 확인한다.
+RF-01의 계약을 RF-03~06에 적용하고, #34에서 공격 입출력 경계를 추가했다. 실제 2인 대전 조정과 P2P 규격은 후속 범위다. 현재 구조는 [구현 안내](README.md), 단계별 결과는 [전달 계획](delivery-plan.md)에서 확인한다.
 
 ## 1. 호출과 소유권
 
@@ -11,6 +11,8 @@ GameEngine(GameConfig config, BlockSource blocks);
 GameUpdate start();
 GameUpdate handle(GameCommand command);
 GameUpdate advance(long elapsedNanos);
+GameUpdate receiveAttack(AttackEvent event);
+List<AttackRow> pendingAttackRows();
 GameUpdate continueAfterLock(long turnId);
 GameUpdate stop();
 GameSnapshot snapshot();
@@ -23,6 +25,7 @@ GameSnapshot snapshot();
 | GameState | 엔진 내부만 수정. 고정 셀과 현재 블록 분리, public setter 없음 |
 | BlockSource | nextBlock(Difficulty), nextItemBlock(). 운영은 기존 Generator 호출, 각 엔진에 독립 인스턴스·새 Block 공급 |
 | GameUpdate | snapshot, 선택적인 lockResolution/gameEnd, 다음 갱신까지의 nextWakeupNanos |
+| LockResolution | turnId, 삭제 사실을 담은 ClearBatch 목록, 선택적인 attack. 공격은 이 결과를 소비할 때 한 번 전달 |
 | 실행 주체 | 초기 1인 UI에서는 Controller가 EDT에서 직렬 호출. 엔진은 Swing·파일·소켓을 사용하지 않음 |
 
 생성만으로 게임이나 난수 공급을 시작하지 않는다. 최초 start에서 current/next 두 블록을 받고, 중복 start는 무시한다. 종료 후에는 새 엔진을 만든다. stop은 중복 호출해도 안전하며 효과·미처리 고정·공급 대기를 취소한다. 자연 게임오버 결과는 한 번만 반환하고, 메뉴 종료는 기록 저장을 유발하지 않는다.
@@ -44,7 +47,11 @@ stop은 모든 진행 상태에서 가능하다. pause는 효과 진행 상태�
 
 일반 블록·Anchor·Bomb는 고정을 일으킨 호출에서 LockResolution을 반환한다. Row·Column·Cross는 효과 시작 시 RESOLVING만 반환하고, 효과를 확정하는 마지막 advance에서 결과를 반환한다. Controller는 결과를 받은 호출 안에서 continueAfterLock을 한 번 실행한다.
 
-순서는 **고정 → 아이템 효과 → 줄 삭제·점수 → 고정 결과 → next 충돌 확인 → current 교체 → 새 next 공급**이다. 충돌·stop·오래된/중복 turnId에서는 추가 블록을 뽑지 않는다. 실제 삭제마다 ClearBatch에 삭제 직전 행·삭제 원인·이번 블록에서 온 셀 위치를 복사한다. 공격량이나 아이템 공격 인정 정책은 넣지 않는다.
+순서는 **고정 → 아이템 효과 → 줄 삭제·점수 → 고정 결과·공격 전달 → 받은 공격 적용 → next 충돌 확인 → current 교체 → 새 next 공급**이다. 충돌·stop·오래된/중복 turnId에서는 추가 블록을 뽑지 않는다. 실제 삭제마다 ClearBatch에 삭제 직전 행·삭제 원인·이번 블록에서 온 셀 위치를 복사한다. `rowsBefore`와 `lockedPieceOriginMasks`는 삭제한 행만 담으며 서로 같은 순서다.
+
+`AttackRules.fromClearBatches`는 `COMPLETED_ROWS`가 2줄 이상이면 공격을 만든다. 삭제 전 행에서 이번 블록의 칸을 비운 모양을 그대로 전달한다. 아이템 효과 삭제는 제외하며, Item 모드에서 일반 블록으로 완성한 줄은 포함한다.
+
+`receiveAttack`은 대기열에 최대 10줄을 보관하고, 초과분은 뒤에서 버린다. 적용은 유효한 `continueAfterLock`에서 한 번만 수행한다. 위로 밀려나가는 기존 셀이 있으면 GameEnd를 한 번 반환하고 추가 블록을 공급하지 않는다. NEW/GAME_OVER/STOPPED에서 수신은 무시하며, stop과 게임오버는 대기열을 비운다. `pendingAttackRows`는 외부에서 변경할 수 없는 사본이다.
 
 ## 3. 화면 사본 형식
 
