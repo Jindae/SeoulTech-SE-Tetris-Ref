@@ -54,6 +54,7 @@
 | `900X750` | 750 × 900 | 아니오 |
 
 설정 저장 후 설정 화면에서 나올 때 새 크기를 적용한다.
+게임 패널은 선택한 너비와 높이를 유지한다. 제목 표시줄과 작업 표시줄을 제외한 공간에 패널이 들어가지 않으면, 창을 해당 모니터의 작업 영역 안에 배치하고 스크롤로 패널 끝까지 이동할 수 있게 한다.
 근거: [Maincontainer 설정 적용](../src/main/java/seoultech/se/tetris/component/Maincontainer.java#L124), [설정 후보](../src/main/java/seoultech/se/tetris/component/Maincontainer.java#L211).
 
 ## 2. 모드와 난이도

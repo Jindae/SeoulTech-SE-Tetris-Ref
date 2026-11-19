@@ -108,7 +108,6 @@ public class Maincontainer extends JFrame{
     }
     protected void exitSettingEnterStart() {
         mainPanel.remove(settingPanel);
-        remove(mainPanel);
         applySetting();
         enterStart();
     }
@@ -140,18 +139,39 @@ public class Maincontainer extends JFrame{
         difficulty = Difficulty.parse(setting.getDifficulty()).orElse(Difficulty.NORMAL);
         timeLimitSeconds = Integer.parseInt(setting.getTimeLimitSeconds());
 
-        // container에 띄우기 위한 빈 panel
         mainPanel.setPreferredSize(new Dimension(WIDTH, HEIGHT));
         mainPanel.setBackground(Color.BLACK);
         mainPanel.setOpaque(true);
-        add(mainPanel); // container에 mainPanel 추가
-        pack();
-        // Window.pack() may clamp the outer window to the usable screen bounds.
-        // The configured dimensions describe the content area, so restore that
-        // contract explicitly after pack() has created the native peer/insets.
-        Insets insets = getInsets();
-        setSize(WIDTH + insets.left + insets.right, HEIGHT + insets.top + insets.bottom);
+        sizeWindowForGame();
         setVisible(true);
+    }
+
+    private void sizeWindowForGame() {
+        if (!isDisplayable()) addNotify(); // Obtain native frame decorations before sizing.
+        GraphicsConfiguration monitor = getGraphicsConfiguration();
+        Rectangle workArea = new Rectangle(monitor.getBounds());
+        Insets reserved = getToolkit().getScreenInsets(monitor);
+        workArea.setBounds(workArea.x + reserved.left, workArea.y + reserved.top,
+            workArea.width - reserved.left - reserved.right, workArea.height - reserved.top - reserved.bottom);
+        Insets frame = getInsets();
+        int availableWidth = Math.max(1, workArea.width - frame.left - frame.right);
+        int availableHeight = Math.max(1, workArea.height - frame.top - frame.bottom);
+        if (WIDTH <= availableWidth && HEIGHT <= availableHeight) {
+            setContentPane(mainPanel);
+        } else {
+            JScrollPane scroll = new JScrollPane(mainPanel);
+            scroll.setBorder(null);
+            scroll.setViewportBorder(null);
+            // Leave room for the scrollbar so it does not hide a column on a short display.
+            int barWidth = HEIGHT > availableHeight ? scroll.getVerticalScrollBar().getPreferredSize().width : 0;
+            int barHeight = WIDTH > availableWidth ? scroll.getHorizontalScrollBar().getPreferredSize().height : 0;
+            scroll.setPreferredSize(new Dimension(Math.min(availableWidth, WIDTH + barWidth),
+                Math.min(availableHeight, HEIGHT + barHeight)));
+            setContentPane(scroll);
+        }
+        pack();
+        setLocation(Math.clamp(getX(), workArea.x, Math.max(workArea.x, workArea.x + workArea.width - getWidth())),
+            Math.clamp(getY(), workArea.y, Math.max(workArea.y, workArea.y + workArea.height - getHeight())));
     }
 
     // 게임 설정 크기는 제목 표시줄·테두리를 포함한 JFrame의 실제 크기와 구분한다.
