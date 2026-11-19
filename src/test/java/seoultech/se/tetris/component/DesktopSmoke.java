@@ -11,6 +11,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import javax.imageio.ImageIO;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import seoultech.se.tetris.score.ScoreStore;
 import seoultech.se.tetris.Difficulty;
@@ -149,7 +150,8 @@ public final class DesktopSmoke {
         check(frame.getConfiguredHeight() == Integer.parseInt(dimensions[0])
                 && frame.getConfiguredWidth() == Integer.parseInt(dimensions[1]),
             "actual frame must apply configured size " + size);
-        awaitContentSize(frame, new java.awt.Dimension(frame.getConfiguredWidth(), frame.getConfiguredHeight()));
+        verifyConfiguredCanvas(frame,
+            new java.awt.Dimension(frame.getConfiguredWidth(), frame.getConfiguredHeight()));
         check(frame.setting.getColorPalette().equals(palette)
                 && Maincontainer.colorPalette.equals(palette),
             "actual frame must apply configured palette " + palette);
@@ -168,26 +170,63 @@ public final class DesktopSmoke {
             palette + " representative game must cleanly return to the menu");
     }
 
-    // On Windows a visible peer can deliver the resize after the settings action returns.
-    private static void awaitContentSize(JFrame frame, java.awt.Dimension expected) {
-        var content = frame.getContentPane();
-        var initial = content.getSize();
-        if (!initial.equals(expected)) {
-            var loop = java.awt.Toolkit.getDefaultToolkit().getSystemEventQueue().createSecondaryLoop();
-            long deadline = System.nanoTime() + 2_000_000_000L;
-            var poll = new javax.swing.Timer(20, event -> {
-                if (content.getSize().equals(expected) || System.nanoTime() >= deadline) loop.exit();
-            });
-            poll.start();
-            try { loop.enter(); } finally { poll.stop(); }
-        }
+    private static void verifyConfiguredCanvas(JFrame frame, java.awt.Dimension expected) throws Exception {
+        JPanel canvas = (JPanel) field(frame, "mainPanel");
+        frame.validate();
+        frame.getToolkit().sync();
+
         var gc = frame.getGraphicsConfiguration();
-        String geometry = "expected=" + expected + ", initial=" + initial + ", settled=" + content.getSize()
-            + ", frame=" + frame.getBounds() + ", decorations=" + frame.getInsets()
-            + ", display=" + gc.getBounds() + ", screenInsets=" + frame.getToolkit().getScreenInsets(gc)
-            + ", transform=" + gc.getDefaultTransform();
-        System.out.println("Desktop resize: " + geometry);
-        check(content.getSize().equals(expected), "rendered content must use configured size: " + geometry);
+        var screenInsets = frame.getToolkit().getScreenInsets(gc);
+        var workArea = new java.awt.Rectangle(
+            gc.getBounds().x + screenInsets.left,
+            gc.getBounds().y + screenInsets.top,
+            gc.getBounds().width - screenInsets.left - screenInsets.right,
+            gc.getBounds().height - screenInsets.top - screenInsets.bottom);
+        boolean fits = expected.width + frame.getInsets().left + frame.getInsets().right <= workArea.width
+            && expected.height + frame.getInsets().top + frame.getInsets().bottom <= workArea.height;
+        String geometry = "expected=" + expected + ", canvas=" + canvas.getSize()
+            + ", content=" + frame.getContentPane().getSize() + ", frame=" + frame.getBounds()
+            + ", workArea=" + workArea + ", decorations=" + frame.getInsets();
+        System.out.println("Desktop layout: " + geometry);
+
+        check(canvas.getPreferredSize().equals(expected) && canvas.getSize().equals(expected),
+            "configured game canvas must keep its exact dimensions: " + geometry);
+        check(workArea.contains(frame.getBounds()),
+            "visible frame must stay inside the desktop work area: " + geometry);
+        if (fits) {
+            check(frame.getContentPane() == canvas,
+                "a canvas that fits the work area must remain the direct content pane: " + geometry);
+            return;
+        }
+
+        check(frame.getContentPane() instanceof JScrollPane,
+            "an oversized canvas must use a scrollable viewport: " + geometry);
+        JScrollPane scroll = (JScrollPane) frame.getContentPane();
+        check(scroll.getBorder() == null && scroll.getViewport().getView() == canvas,
+            "the viewport must expose the configured canvas without an extra border: " + geometry);
+        var viewportExtent = scroll.getViewport().getExtentSize();
+        boolean widthClipped = expected.width > viewportExtent.width;
+        boolean heightClipped = expected.height > viewportExtent.height;
+        check((!widthClipped || scroll.getHorizontalScrollBar().isVisible())
+                && (!heightClipped || scroll.getVerticalScrollBar().isVisible()),
+            "each clipped canvas edge must have a visible scrollbar: " + geometry);
+        int right = scroll.getHorizontalScrollBar().getMaximum()
+            - scroll.getHorizontalScrollBar().getModel().getExtent();
+        int bottom = scroll.getVerticalScrollBar().getMaximum()
+            - scroll.getVerticalScrollBar().getModel().getExtent();
+        check(right > 0 || bottom > 0,
+            "an oversized canvas must have a reachable clipped edge: " + geometry);
+        scroll.getHorizontalScrollBar().setValue(right);
+        scroll.getVerticalScrollBar().setValue(bottom);
+        check(scroll.getHorizontalScrollBar().getValue() == right
+                && scroll.getVerticalScrollBar().getValue() == bottom,
+            "the viewport must reach the canvas bottom-right edge: " + geometry);
+        check(scroll.getViewport().getViewRect().contains(expected.width - 1, expected.height - 1),
+            "the canvas bottom-right pixel must be visible at the scroll limit: " + geometry);
+        scroll.getHorizontalScrollBar().setValue(0);
+        scroll.getVerticalScrollBar().setValue(0);
+        check(scroll.getViewport().getViewPosition().equals(new java.awt.Point()),
+            "the viewport must return to the canvas origin before game input: " + geometry);
     }
 
     public static void main(String[] args) throws Exception {
