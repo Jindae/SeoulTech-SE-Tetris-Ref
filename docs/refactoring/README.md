@@ -8,15 +8,14 @@ Classic/Item 1인 게임을 담당하는 Java Swing 프로젝트다. 이번 리�
 
 | 항목 | 기준 |
 |---|---|
-| 최종 통합 브랜치 | `refactor/rf05-06-integration` |
-| 개발 시작 기준 | 팀이 확정한 통합 브랜치의 최신 커밋. 이 가이드까지 포함한 커밋 SHA를 함께 공유 |
+| 개발 시작 기준 | 최신 원격 `main`에서 기능 브랜치 생성 |
 | 구현 완료 시점 기록 | `b58a33b` — RF-06 구현·검증 완료 시점. 후속 MENU 입력 진단은 [별도 검증 기록](native-focus-fix.md) 참고 |
 | 단계별 브랜치 | RF-01·02 → RF-03·04 → RF-05·06 순서로 누적 |
-| 공유 방식 | 세 단계별 브랜치를 연결된 PR로 리뷰. 순서와 병합 시 주의점은 [PR 구성](delivery-plan.md) 참고 |
-| 구현 범위 | Classic/Item 1인 게임, 엔진 두 개의 독립 실행 검증 |
-| 다음 개발 범위 | 실제 대전·공격·P2P·재대전·연결 장애 처리 |
+| 통합 기록 | RF-01~06은 #36으로 `main` 통합. #34의 공격 기능도 새 엔진 경계로 이전 |
+| 구현 범위 | Classic/Item 1인 게임, 엔진 독립 실행, 공격 생성·수신 대기열·턴 경계 적용 |
+| 다음 개발 범위 | 실제 2인 대전 연결·P2P·재대전·연결 장애 처리 |
 
-팀 개발을 시작할 때는 원격에 게시된 최종 통합 브랜치와 팀이 합의한 기준 커밋에서 기능 브랜치를 만든다. PR 생성은 현재 사용자 요청으로 보류 중이다.
+예전 기능 브랜치는 최신 `main`을 먼저 합친다. 충돌을 해결할 때 Board의 옛 게임 규칙을 되살리지 않고, 아래 Engine·Controller·View 경계에 기능을 연결한다.
 
 ## 2. 구조가 어떻게 달라졌나
 
@@ -60,7 +59,7 @@ flowchart LR
 
 **화면 반영:** 엔진이 반환한 [GameUpdate](../../src/main/java/seoultech/se/tetris/game/GameUpdate.java)를 Controller의 `consume`이 처리한다. `publish`가 [GameSnapshot](../../src/main/java/seoultech/se/tetris/game/GameSnapshot.java)을 Board와 Gamepanel에 전달한다. Board는 사본을 보관하고 `repaint()`한다.
 
-**블록 고정:** `GameUpdate.lockResolution()`이 있으면 현재 1인 Controller는 그 `turnId`로 `continueAfterLock`을 한 번 호출한다. 이때 다음 블록의 등장 충돌을 확인하고 새 블록을 공급한다. 이 단계를 누락하면 `AWAITING_SPAWN` 상태에서 다음 블록이 나오지 않는다.
+**블록 고정:** `GameUpdate.lockResolution()`이 있으면 Controller가 공격 이벤트를 전달하고, 그 `turnId`로 `continueAfterLock`을 한 번 호출한다. 이때 받은 공격을 적용한 뒤 다음 블록의 등장 충돌을 확인하고 새 블록을 공급한다. 이 단계를 누락하면 `AWAITING_SPAWN` 상태에서 다음 블록이 나오지 않는다.
 
 ## 5. 다음 기능을 붙일 때 지킬 규칙
 
@@ -107,7 +106,19 @@ flowchart LR
 
 ## 7. 대전 개발을 시작할 때
 
-현재 검증한 것은 **두 엔진의 상태·입력·효과·공급이 서로 간섭하지 않는다는 점**이다. 로컬 2인 플레이·P2P 동기화·통신 지연 대응을 검증한 것은 아니다.
+현재는 **엔진 독립 실행과 공격 생성·수신·적용 경계**까지 구현되어 있다. 실제 로컬 2인 화면·P2P 동기화·통신 지연 대응은 후속 작업이다.
+
+| 대전 연결 지점 | 사용법 |
+|---|---|
+| 공격 보내기 | `GameUpdate.lockResolution().attack()`의 `AttackEvent`를 상대에게 전달 |
+| 공격 받기 | 상대 엔진의 `receiveAttack(event)` 호출. 즉시 보드를 올리지 않고 대기열에 적재 |
+| 공격 적용 | 수신 엔진의 다음 `continueAfterLock(turnId)`에서 적용 후 등장 충돌 검사 |
+| 대기열 표시 | `pendingAttackRows()`의 불변 행 목록 사용. 최대 10줄 |
+| 기존 Swing 화면 연결 | `GameController.setAttackSink(...)` / `receiveAttack(...)`. EDT에서 순서대로 호출 |
+
+공격 행은 삭제 전 셀에서 방금 고정한 블록의 칸을 비워 만든다. 일반 줄 삭제가 2줄 이상일 때만 생성하며, Item 모드의 일반 블록도 포함한다. 아이템 효과 삭제의 공격 인정 정책은 아직 추가하지 않았다. `linesCleared` 숫자로 공격을 다시 만들지 말고 엔진이 반환한 `AttackEvent`를 사용한다.
+
+`handle`과 `advance` 양쪽에서 나온 고정 결과를 처리해야 한다. 각 결과의 공격은 한 번 전달하고 `continueAfterLock`도 한 번 호출한다. 세션 구분·네트워크 중복 수신 방지는 이후 대전·통신 계층의 책임이다.
 
 대전 조정 계층인 MatchEngine과 통신 계층은 후속 설계 대상이다. 현재 GameController는 Swing 화면을 직접 참조한다. 대전에서 재사용할 핵심은 GameEngine과 명령·상태 사본의 경계이며, 통신 방식과 대전 규칙은 PDF에 맞춰 별도로 확정한다. Snapshot JSON 예시는 표시 데이터 설명용이며 통신 프로토콜 구현은 아니다.
 
