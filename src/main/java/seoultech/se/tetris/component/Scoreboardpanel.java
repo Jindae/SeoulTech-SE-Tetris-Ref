@@ -22,7 +22,7 @@ public class Scoreboardpanel extends JPanel{
     private int HEIGHT;
     private int WIDTH;
     private GameMode selectedMode;
-    private final JToggleButton[] modeButtons = new JToggleButton[3];
+    private final JToggleButton[] modeButtons = new JToggleButton[GameMode.values().length + 1];
     private List<ScoreStore.Score> visibleScores = List.of();
     private ScoreStore.Score highlightedScore;
 
@@ -46,14 +46,13 @@ public class Scoreboardpanel extends JPanel{
         scorepanel.setBorder(BorderFactory.createLineBorder(changeColor(Color.GRAY), 1));
         scorepanel.setOpaque(false);
         scorepanel.setMargin(new Insets(10, 10, 10, 10));
-        JPanel filters = new JPanel(new GridLayout(1, 3, 6, 0));
+        JPanel filters = new JPanel(new GridLayout(1, modeButtons.length, 6, 0));
         filters.setOpaque(false);
         filters.setBounds(10, 10, WIDTH - 20, 32);
         ButtonGroup filterGroup = new ButtonGroup();
-        String[] labels = {"All", "Classic", "Item"};
         for (int index = 0; index < modeButtons.length; index++) {
             GameMode filterMode = index == 0 ? null : GameMode.values()[index - 1];
-            JToggleButton button = new JToggleButton(labels[index]);
+            JToggleButton button = new JToggleButton(index == 0 ? "All" : filterMode.displayName());
             MenuButtons.styleActionButton(button);
             button.setOpaque(false);
             button.addItemListener(event -> {

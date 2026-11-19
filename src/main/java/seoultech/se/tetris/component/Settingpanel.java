@@ -32,6 +32,7 @@ public class Settingpanel extends JPanel{
     private OptionButton resetScoreOption;
     private OptionButton colorBlindOption;
     private OptionButton difficultyOption;
+    private OptionButton timeLimitOption;
     private OptionButton resetSettingOption;
     private PlayerKeyListener playerKeyListener;
     private int HEIGHT;
@@ -100,6 +101,13 @@ public class Settingpanel extends JPanel{
                 }
             };
             menu.add(settingPanel, difficultyOption);
+            timeLimitOption = new OptionButton("Time Limit (sec): ", maincontainer.setting.getTimeLimitSeconds()) {
+                @Override
+                protected void isPressed() {
+                    option.setText(maincontainer.setting.nextTimeLimitSeconds());
+                }
+            };
+            menu.add(settingPanel, timeLimitOption);
             // 모든 설정을 기본값으로 되돌린다.
             resetSettingOption = new OptionButton("Reset setting", null) {
                 @Override 
@@ -108,6 +116,7 @@ public class Settingpanel extends JPanel{
                     windowSizeOption.option.setText(maincontainer.setting.getWindowSize());
                     colorBlindOption.option.setText(maincontainer.setting.getColorPalette());
                     difficultyOption.option.setText(maincontainer.setting.getDifficulty());
+                    timeLimitOption.option.setText(maincontainer.setting.getTimeLimitSeconds());
                     Settingpanel.this.revalidate();
                     Settingpanel.this.repaint();
                 }

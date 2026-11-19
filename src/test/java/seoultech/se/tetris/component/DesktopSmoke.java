@@ -186,7 +186,7 @@ public final class DesktopSmoke {
                 JPanel start = (JPanel) field(frame, "startPanel");
                 for (int turn = 0; turn < 40; turn++) key(start, KeyEvent.VK_DOWN);
                 for (int turn = 0; turn < 40; turn++) key(start, KeyEvent.VK_UP);
-                key(start, KeyEvent.VK_ENTER); // Equal down/up cycles return to CLASSIC for any menu size.
+                key(start, KeyEvent.VK_ENTER); // Round trips remain on the first menu choice.
                 Gamepanel game = (Gamepanel) field(frame, "gamePanel");
                 GameController controller = game.controller();
                 controller.timer().stop();

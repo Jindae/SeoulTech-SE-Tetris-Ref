@@ -40,6 +40,7 @@ public final class GameEngineFixture {
         state.pendingLock = null;
         state.itemEffect = null;
         state.pendingItems = 0;
+        state.pendingAttacks.clear();
         state.anchorTouched = false;
         state.highlightedRows.clear();
         state.gravityElapsedNanos = 0;

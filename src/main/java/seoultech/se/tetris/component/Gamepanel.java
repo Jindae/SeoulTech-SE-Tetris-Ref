@@ -4,6 +4,8 @@ import static seoultech.se.tetris.component.Maincontainer.changeColor;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
+import java.time.Duration;
+import java.util.Objects;
 import java.util.function.LongSupplier;
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;
@@ -17,9 +19,11 @@ import javax.swing.text.StyledDocument;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.GameMode;
 import seoultech.se.tetris.game.GameConfig;
+import seoultech.se.tetris.game.BattleEventSink;
 import seoultech.se.tetris.game.GameEngine;
 import seoultech.se.tetris.game.GameSnapshot;
 import seoultech.se.tetris.game.GeneratorBlockSource;
+import seoultech.se.tetris.game.MatchClock;
 import seoultech.se.tetris.score.ScoreStore;
 
 public class Gamepanel extends JPanel{
@@ -42,6 +46,8 @@ public class Gamepanel extends JPanel{
     private int WIDTH;
     private KeyListener playerKeyListener;
     private final transient GameController controller;
+    private JLabel timeLabel;
+    private boolean resultFinalized;
 
     public Gamepanel(Maincontainer maincontainer) {
         this(maincontainer, "Classic");
@@ -53,13 +59,23 @@ public class Gamepanel extends JPanel{
     }
 
     public Gamepanel(Maincontainer maincontainer, GameMode gameMode) {
+        this(maincontainer, gameMode, BattleEventSink.NONE);
+    }
+
+    public Gamepanel(Maincontainer maincontainer, GameMode gameMode, BattleEventSink battleEvents) {
         this(maincontainer, gameMode, new GameEngine(
             new GameConfig(gameMode, maincontainer.getDifficulty()), new GeneratorBlockSource()),
-            System::nanoTime);
+            System::nanoTime, battleEvents, Duration.ofSeconds(maincontainer.getTimeLimitSeconds()));
     }
 
     Gamepanel(Maincontainer maincontainer, GameMode gameMode, GameEngine engine,
             LongSupplier clock) {
+        this(maincontainer, gameMode, engine, clock, BattleEventSink.NONE,
+            Duration.ofSeconds(maincontainer.getTimeLimitSeconds()));
+    }
+
+    Gamepanel(Maincontainer maincontainer, GameMode gameMode, GameEngine engine,
+            LongSupplier clock, BattleEventSink battleEvents, Duration timeLimit) {
         setLayout(null);
         setBackground(changeColor(Color.LIGHT_GRAY));
         this.maincontainer = maincontainer;
@@ -101,7 +117,23 @@ public class Gamepanel extends JPanel{
         docScore.setParagraphAttributes(7, 1, styleSetScore2, false);
         add(scorepanel);
 
-        controller = new GameController(this, board, engine, clock);
+        MatchClock matchClock = null;
+        if (gameMode == GameMode.TIME_LIMIT) {
+            matchClock = new MatchClock(Objects.requireNonNull(timeLimit, "timeLimit"), clock);
+            JLabel temporaryLabel = new JLabel("TEMPORARY MODE", SwingConstants.CENTER);
+            temporaryLabel.setFont(new Font("Courier", Font.BOLD, 12));
+            temporaryLabel.setForeground(changeColor(Color.GRAY));
+            temporaryLabel.setBounds(WIDTH*330/500+20, HEIGHT*165/600+20, WIDTH*140/500, 24);
+            add(temporaryLabel);
+            timeLabel = new JLabel("Time 00:00", SwingConstants.CENTER);
+            timeLabel.setFont(new Font("Courier", Font.BOLD, 16));
+            timeLabel.setForeground(changeColor(Color.RED));
+            timeLabel.setBounds(WIDTH*330/500+20, HEIGHT*190/600+20, WIDTH*140/500, 30);
+            add(timeLabel);
+        }
+
+        controller = new GameController(this, board, engine, clock, matchClock,
+            Objects.requireNonNull(battleEvents, "battleEvents"));
         JButton menuButton = new JButton("MENU");
         MenuButtons.styleActionButton(menuButton);
         menuButton.setOpaque(true);
@@ -143,7 +175,19 @@ public class Gamepanel extends JPanel{
         if (!snapshot.paused() && pausepanel != null) gameRestart();
     }
 
+    void showRemainingTime(long seconds) {
+        if (timeLabel != null) {
+            timeLabel.setText(String.format("Time %02d:%02d", seconds / 60, seconds % 60));
+        }
+    }
+
     protected void gameOver() {
+        gameOver("Game Over");
+    }
+
+    void gameOver(String title) {
+        if (resultFinalized) return;
+        resultFinalized = true;
         controller.stop();
         var rankings = ScoreStore.readRanked(gameMode);
         if (rankings.size() >= 10 && score <= rankings.get(9).score()) {
@@ -167,7 +211,7 @@ public class Gamepanel extends JPanel{
         JPanel gridPanel = new JPanel(new GridLayout(0, 1));
         gridPanel.setOpaque(false);
 
-            JLabel gotext = new JLabel("Game Over", SwingConstants.CENTER);
+            JLabel gotext = new JLabel(title, SwingConstants.CENTER);
             gotext.setFont(new Font("Courier", Font.BOLD, 30));
             gotext.setForeground(changeColor(Color.WHITE));
 
