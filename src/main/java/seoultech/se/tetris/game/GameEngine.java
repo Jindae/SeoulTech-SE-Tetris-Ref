@@ -7,6 +7,9 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 import seoultech.se.tetris.GameMode;
+import seoultech.se.tetris.attack.AttackEvent;
+import seoultech.se.tetris.attack.AttackRow;
+import seoultech.se.tetris.attack.AttackRules;
 import seoultech.se.tetris.blocks.AnchorBlock;
 import seoultech.se.tetris.blocks.Block;
 import seoultech.se.tetris.blocks.BombBlock;
@@ -87,14 +90,9 @@ public final class GameEngine {
         if (state.phase != GamePhase.AWAITING_SPAWN || state.pendingLock == null
                 || state.pendingLock.turnId() != turnId) return update(null, null);
         state.pendingLock = null;
+        if (applyPendingAttacks()) return endGame();
         if (queuedBlockCollidesAtSpawn()) {
-            state.phase = GamePhase.GAME_OVER;
-            state.highlightedRows.clear();
-            state.highlightElapsedNanos = 0;
-            state.gravityElapsedNanos = 0;
-            state.pendingItems = 0;
-            GameEnd end = new GameEnd(state.score, state.clearedLines, state.level);
-            return update(null, end);
+            return endGame();
         }
         state.current = state.next;
         if (config.mode() == GameMode.ITEM && state.pendingItems > 0) {
@@ -118,11 +116,26 @@ public final class GameEngine {
         state.pendingLock = null;
         state.itemEffect = null;
         state.pendingItems = 0;
+        state.pendingAttacks.clear();
         state.anchorTouched = false;
         state.highlightedRows.clear();
         state.gravityElapsedNanos = 0;
         state.highlightElapsedNanos = 0;
         return update(null, null);
+    }
+
+    /** Queues an opponent's immutable attack for the next lock-to-spawn boundary. */
+    public GameUpdate receiveAttack(AttackEvent attack) {
+        Objects.requireNonNull(attack, "attack");
+        if (state.phase == GamePhase.ACTIVE || state.phase == GamePhase.RESOLVING
+                || state.phase == GamePhase.AWAITING_SPAWN) {
+            state.pendingAttacks.enqueue(attack);
+        }
+        return update(null, null);
+    }
+
+    public List<AttackRow> pendingAttackRows() {
+        return state.pendingAttacks.snapshot();
     }
 
     public GameSnapshot snapshot() {
@@ -216,7 +229,8 @@ public final class GameEngine {
     }
 
     private GameUpdate finishLock(long turnId, int clearedBefore, List<ClearBatch> batches) {
-        LockResolution resolution = new LockResolution(turnId, batches, state.score,
+        LockResolution resolution = new LockResolution(turnId, batches,
+            AttackRules.fromClearBatches(batches), state.score,
             state.clearedLines, state.level);
         if (config.mode() == GameMode.ITEM) {
             state.pendingItems += state.clearedLines / 10 - clearedBefore / 10;
@@ -226,6 +240,44 @@ public final class GameEngine {
         state.itemEffect = null;
         state.phase = GamePhase.AWAITING_SPAWN;
         return update(resolution, null);
+    }
+
+    private boolean applyPendingAttacks() {
+        List<AttackRow> incoming = state.pendingAttacks.drain();
+        if (incoming.isEmpty()) return false;
+        int count = incoming.size();
+        boolean overflow = false;
+        for (int row = 0; row < count; row++) {
+            for (GameState.FixedCell cell : state.fixed[row]) {
+                if (cell != null) overflow = true;
+            }
+        }
+        for (int row = 0; row < GameState.HEIGHT - count; row++) {
+            state.fixed[row] = state.fixed[row + count];
+        }
+        for (int index = 0; index < count; index++) {
+            int row = GameState.HEIGHT - count + index;
+            AttackRow attackRow = incoming.get(index);
+            state.fixed[row] = new GameState.FixedCell[GameState.WIDTH];
+            for (int column = 0; column < GameState.WIDTH; column++) {
+                if (attackRow.occupiedAt(column)) {
+                    state.fixed[row][column] = new GameState.FixedCell(
+                        1, "G", 0xff808080, 0);
+                }
+            }
+        }
+        return overflow;
+    }
+
+    private GameUpdate endGame() {
+        state.phase = GamePhase.GAME_OVER;
+        state.highlightedRows.clear();
+        state.highlightElapsedNanos = 0;
+        state.gravityElapsedNanos = 0;
+        state.pendingItems = 0;
+        state.pendingAttacks.clear();
+        GameEnd end = new GameEnd(state.score, state.clearedLines, state.level);
+        return update(null, end);
     }
 
     private List<ClearBatch> clearCompletedRows(long turnId, ClearBatch.Cause cause,

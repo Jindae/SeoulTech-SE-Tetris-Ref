@@ -5,8 +5,10 @@ import java.awt.event.KeyEvent;
 import java.util.List;
 import java.util.Objects;
 import java.util.OptionalLong;
+import java.util.function.Consumer;
 import java.util.function.LongSupplier;
 import javax.swing.Timer;
+import seoultech.se.tetris.attack.AttackEvent;
 import seoultech.se.tetris.game.BattleEventSink;
 import seoultech.se.tetris.game.ClearBatch;
 import seoultech.se.tetris.game.GameCommand;
@@ -32,6 +34,7 @@ public final class GameController {
     private long lastAdvanceNanos;
     private long timerGeneration;
     private int publishedScore;
+    private Consumer<AttackEvent> attackSink = ignored -> {};
 
     GameController(Gamepanel gamepanel, Board board, GameEngine engine, LongSupplier clock,
             MatchClock matchClock, BattleEventSink battleEvents) {
@@ -121,6 +124,19 @@ public final class GameController {
         publish(engine.snapshot());
     }
 
+    /** Connects locally generated attacks to a match or transport coordinator. */
+    public void setAttackSink(Consumer<AttackEvent> sink) {
+        attackSink = Objects.requireNonNull(sink, "sink");
+    }
+
+    /** Routes an opponent attack through the same serialized controller boundary as input. */
+    public void receiveAttack(AttackEvent attack) {
+        Objects.requireNonNull(attack, "attack");
+        if (!started || stopped) return;
+        if (advanceToNow(false)) return;
+        consume(engine.receiveAttack(attack), true);
+    }
+
     private void timerFired(ActionEvent event) {
         long callbackGeneration;
         try {
@@ -145,8 +161,10 @@ public final class GameController {
     private void consume(GameUpdate update, boolean schedule) {
         GameUpdate displayed = Objects.requireNonNull(update, "update");
         if (displayed.lockResolution().isPresent()) {
-            publishCompletedLines(displayed.lockResolution().orElseThrow().clearBatches());
-            displayed = engine.continueAfterLock(displayed.lockResolution().orElseThrow().turnId());
+            var resolution = displayed.lockResolution().orElseThrow();
+            publishCompletedLines(resolution.clearBatches());
+            resolution.attack().ifPresent(attackSink);
+            displayed = engine.continueAfterLock(resolution.turnId());
         }
         publish(displayed.snapshot());
         if (displayed.gameEnd().isPresent() && !gameOverPublished) {
