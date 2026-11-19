@@ -4,6 +4,7 @@ import static seoultech.se.tetris.component.Maincontainer.changeColor;
 import java.awt.*;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
+import java.util.function.LongSupplier;
 import javax.swing.BorderFactory;
 import javax.swing.JLabel;
 import javax.swing.JButton;
@@ -13,9 +14,12 @@ import javax.swing.SwingConstants;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
-import seoultech.se.tetris.blocks.Block;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.GameMode;
+import seoultech.se.tetris.game.GameConfig;
+import seoultech.se.tetris.game.GameEngine;
+import seoultech.se.tetris.game.GameSnapshot;
+import seoultech.se.tetris.game.GeneratorBlockSource;
 import seoultech.se.tetris.score.ScoreStore;
 
 public class Gamepanel extends JPanel{
@@ -49,15 +53,25 @@ public class Gamepanel extends JPanel{
     }
 
     public Gamepanel(Maincontainer maincontainer, GameMode gameMode) {
+        this(maincontainer, gameMode, new GameEngine(
+            new GameConfig(gameMode, maincontainer.getDifficulty()), new GeneratorBlockSource()),
+            System::nanoTime);
+    }
+
+    Gamepanel(Maincontainer maincontainer, GameMode gameMode, GameEngine engine,
+            LongSupplier clock) {
         setLayout(null);
         setBackground(changeColor(Color.LIGHT_GRAY));
         this.maincontainer = maincontainer;
-        this.gameMode = java.util.Objects.requireNonNull(gameMode, "gameMode");
-        this.difficulty = maincontainer.getDifficulty();
+        GameSnapshot initial = java.util.Objects.requireNonNull(engine, "engine").snapshot();
+        if (initial.mode() != java.util.Objects.requireNonNull(gameMode, "gameMode")) {
+            throw new IllegalArgumentException("gameMode does not match engine config");
+        }
+        this.gameMode = initial.mode();
+        this.difficulty = initial.difficulty();
         HEIGHT = maincontainer.getConfiguredHeight(); WIDTH = maincontainer.getConfiguredWidth();
 
-        board = new Board(this);
-        controller = new GameController(this, board);
+        board = new Board();
         board.setBounds(10, 10, WIDTH*330/500, HEIGHT*580/600);
         add(board);
 
@@ -86,6 +100,8 @@ public class Gamepanel extends JPanel{
 		StyleConstants.setAlignment(styleSetScore2, StyleConstants.ALIGN_RIGHT);
         docScore.setParagraphAttributes(7, 1, styleSetScore2, false);
         add(scorepanel);
+
+        controller = new GameController(this, board, engine, clock);
         JButton menuButton = new JButton("MENU");
         MenuButtons.styleActionButton(menuButton);
         menuButton.setOpaque(true);
@@ -102,29 +118,36 @@ public class Gamepanel extends JPanel{
     
     Difficulty getDifficulty() { return difficulty; }
     GameMode getGameMode() { return gameMode; }
+    GameController controller() { return controller; }
 
     void startGame() { controller.start(); }
 
     void stopGame() { controller.stop(); }
 
-    protected void drawNextBoard(Block next) {
+    protected void drawNextBoard(GameSnapshot.Piece next) {
 		nextblockpanel.drawNextBoard(next);
 	}
 
-    protected void drawScore() {
-        this.score = board.getScore();
+    protected void drawScore(int score) {
+        this.score = score;
         this.scorepanel.setText("Scores\n" + this.score);
         docScore = scorepanel.getStyledDocument();
 		docScore.setParagraphAttributes(0, 1, styleSetScore1, false);
         docScore.setParagraphAttributes(7, 1, styleSetScore2, false);
     }
 
+    void showSnapshot(GameSnapshot snapshot) {
+        drawScore(snapshot.score());
+        drawNextBoard(snapshot.next());
+        if (snapshot.paused() && pausepanel == null) gamePause();
+        if (!snapshot.paused() && pausepanel != null) gameRestart();
+    }
+
     protected void gameOver() {
         controller.stop();
         var rankings = ScoreStore.readRanked(gameMode);
-        if (rankings.size() >= 10 && board.getScore() <= rankings.get(9).score()) {
-            board.stopAnimations();
-            maincontainer.exitGameEnterScoreboard(null, board.getScore(), difficulty, gameMode);
+        if (rankings.size() >= 10 && score <= rankings.get(9).score()) {
+            maincontainer.exitGameEnterScoreboard(null, score, difficulty, gameMode);
             return;
         }
         gameOverPanel = new JPanel() {
@@ -148,7 +171,7 @@ public class Gamepanel extends JPanel{
             gotext.setFont(new Font("Courier", Font.BOLD, 30));
             gotext.setForeground(changeColor(Color.WHITE));
 
-            JLabel sctext = new JLabel("Your score is " + board.getScore(), SwingConstants.CENTER);
+            JLabel sctext = new JLabel("Your score is " + score, SwingConstants.CENTER);
             sctext.setFont(new Font("Courier", Font.BOLD, 16));
             sctext.setForeground(changeColor(Color.WHITE));
 
@@ -237,7 +260,8 @@ public class Gamepanel extends JPanel{
     }
 
     protected void gameRestart() {
-        remove(pausepanel);
+        if (pausepanel != null) remove(pausepanel);
+        pausepanel = null;
         revalidate();
         repaint();
     }

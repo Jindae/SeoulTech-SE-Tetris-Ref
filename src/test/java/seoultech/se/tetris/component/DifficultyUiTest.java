@@ -17,6 +17,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.score.ScoreStore;
+import seoultech.se.tetris.game.GameEngineFixture;
+import seoultech.se.tetris.game.GameCommand;
 import sun.misc.Unsafe;
 
 class DifficultyUiTest {
@@ -99,29 +101,27 @@ class DifficultyUiTest {
             owner.setDifficulty(Difficulty.EASY);
             Gamepanel easyGame = new Gamepanel(owner);
             easyGame.startGame();
-            Board easyBoard = ExistingFeatureFixture.get(easyGame, "board", Board.class);
-            easyBoard.timer.stop();
+            GameController easy = easyGame.controller();
+            easy.timer().stop();
             owner.setDifficulty(Difficulty.HARD);
             Gamepanel hardGame = new Gamepanel(owner);
             hardGame.startGame();
-            Board hardBoard = ExistingFeatureFixture.get(hardGame, "board", Board.class);
-            hardBoard.timer.stop();
+            GameController hard = hardGame.controller();
+            hard.timer().stop();
             try {
                 owner.setDifficulty(Difficulty.NORMAL);
                 assertEquals(Difficulty.EASY, easyGame.getDifficulty());
                 assertEquals(Difficulty.HARD, hardGame.getDifficulty());
-                ExistingFeatureFixture.invoke(easyBoard, "levelUp");
-                ExistingFeatureFixture.invoke(hardBoard, "levelUp");
-                assertEquals(827, easyBoard.timer.getDelay());
-                assertEquals(761, hardBoard.timer.getDelay());
-                assertTrue(easyBoard.moveDown());
-                assertEquals(2, easyBoard.getScore());
-                assertEquals(0, hardBoard.getScore());
+                new GameEngineFixture(easy.engine()).progress(0, 10, 2);
+                new GameEngineFixture(hard.engine()).progress(0, 10, 2);
+                assertEquals(827_000_000L, easy.snapshot().dropIntervalNanos());
+                assertEquals(761_000_000L, hard.snapshot().dropIntervalNanos());
+                easy.dispatch(GameCommand.SOFT_DROP);
+                assertEquals(2, easy.snapshot().score());
+                assertEquals(0, hard.snapshot().score());
             } finally {
-                easyBoard.stopAnimations();
-                hardBoard.stopAnimations();
-                easyBoard.timer.stop();
-                hardBoard.timer.stop();
+                easyGame.stopGame();
+                hardGame.stopGame();
             }
             return null;
         });
@@ -184,9 +184,7 @@ class DifficultyUiTest {
     }
 
     private static void stopBoardTimer(Gamepanel game) throws Exception {
-        Field boardField = Gamepanel.class.getDeclaredField("board");
-        boardField.setAccessible(true);
-        ((Board) boardField.get(game)).timer.stop();
+        game.stopGame();
     }
 
     private static void press(javax.swing.JPanel panel, int keyCode) {

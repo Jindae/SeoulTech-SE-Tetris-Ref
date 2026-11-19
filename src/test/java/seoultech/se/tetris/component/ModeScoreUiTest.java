@@ -27,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.GameMode;
 import seoultech.se.tetris.score.ScoreStore;
+import seoultech.se.tetris.game.GameEngineFixture;
 import sun.misc.Unsafe;
 
 @Timeout(10)
@@ -139,7 +140,8 @@ class ModeScoreUiTest {
             Gamepanel tiedClassic = new Gamepanel(owner, GameMode.CLASSIC);
             tiedClassic.startGame();
             try {
-                board(tiedClassic).addScore(100);
+                new GameEngineFixture(tiedClassic.controller().engine()).progress(100, 0, 1);
+                tiedClassic.controller().refreshSnapshot();
                 tiedClassic.gameOver();
                 assertEquals(1, owner.scoreboardTransitions);
                 assertNull(owner.savedName);
@@ -161,7 +163,8 @@ class ModeScoreUiTest {
             Gamepanel firstItem = new Gamepanel(itemOwner, GameMode.ITEM);
             firstItem.startGame();
             try {
-                board(firstItem).addScore(1);
+                new GameEngineFixture(firstItem.controller().engine()).progress(1, 0, 1);
+                firstItem.controller().refreshSnapshot();
                 firstItem.gameOver();
                 assertEquals(0, itemOwner.scoreboardTransitions);
                 assertNotNull(field(firstItem, "gameOverPanel", JPanel.class));
@@ -184,7 +187,8 @@ class ModeScoreUiTest {
                 assertEquals(GameMode.ITEM, game.getGameMode());
                 assertEquals(Difficulty.EASY, game.getDifficulty());
                 owner.setDifficulty(Difficulty.HARD);
-                board(game).addScore(321);
+                new GameEngineFixture(game.controller().engine()).progress(321, 0, 1);
+                game.controller().refreshSnapshot();
                 game.gameOver();
 
                 type(game, 'N', KeyEvent.VK_N);
@@ -283,14 +287,8 @@ class ModeScoreUiTest {
         for (KeyListener listener : panel.getKeyListeners()) listener.keyPressed(event);
     }
 
-    private static Board board(Gamepanel game) throws Exception {
-        return field(game, "board", Board.class);
-    }
-
-    private static void stopGame(Gamepanel game) throws Exception {
-        Board board = board(game);
-        if (board.timer != null) board.timer.stop();
-        board.stopAnimations();
+    private static void stopGame(Gamepanel game) {
+        game.stopGame();
     }
 
     private static String scoreText(Scoreboardpanel panel) throws Exception {

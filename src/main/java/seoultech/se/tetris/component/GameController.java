@@ -1,39 +1,52 @@
 package seoultech.se.tetris.component;
 
+import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.util.Objects;
+import java.util.OptionalLong;
+import java.util.function.LongSupplier;
+import javax.swing.Timer;
 import seoultech.se.tetris.game.GameCommand;
+import seoultech.se.tetris.game.GameEngine;
+import seoultech.se.tetris.game.GameSnapshot;
+import seoultech.se.tetris.game.GameUpdate;
 
-/**
- * Translates configured input and owns the single-player screen lifecycle.
- *
- * <p>RF-02 still delegates game rules to {@link Board}. Later phases replace
- * that delegate with the UI-independent game engine.</p>
- */
+/** Serializes input, elapsed time, engine updates, and immutable UI publication on the EDT. */
 public final class GameController {
     private final Gamepanel gamepanel;
     private final Board board;
+    private final GameEngine engine;
+    private final LongSupplier clock;
+    private final Timer timer;
+
     private boolean started;
     private boolean stopped;
+    private boolean gameOverPublished;
+    private long lastAdvanceNanos;
+    private long timerGeneration;
 
-    GameController(Gamepanel gamepanel, Board board) {
-        this.gamepanel = java.util.Objects.requireNonNull(gamepanel, "gamepanel");
-        this.board = java.util.Objects.requireNonNull(board, "board");
+    GameController(Gamepanel gamepanel, Board board, GameEngine engine, LongSupplier clock) {
+        this.gamepanel = Objects.requireNonNull(gamepanel, "gamepanel");
+        this.board = Objects.requireNonNull(board, "board");
+        this.engine = Objects.requireNonNull(engine, "engine");
+        this.clock = Objects.requireNonNull(clock, "clock");
+        timer = new Timer(1, this::timerFired);
+        timer.setRepeats(false);
+        publish(engine.snapshot());
     }
 
     void start() {
         if (started || stopped) return;
         started = true;
-        board.boardStart();
+        lastAdvanceNanos = clock.getAsLong();
+        consume(engine.start(), true);
     }
 
     void stop() {
         if (stopped) return;
         stopped = true;
-        board.stopAnimations();
-        if (board.timer != null) {
-            board.timer.stop();
-            board.timer = null;
-        }
+        cancelTimer();
+        consume(engine.stop(), false);
     }
 
     void exitToMenu() {
@@ -44,7 +57,8 @@ public final class GameController {
 
     void handleKey(int keyCode) {
         if (!started || stopped) return;
-        if (board.getIsPaused()) {
+        GameSnapshot current = snapshot();
+        if (current.paused()) {
             if (keyCode == KeyEvent.VK_ENTER) {
                 exitToMenu();
             } else if (keyCode == Maincontainer.PAUSE) {
@@ -55,9 +69,7 @@ public final class GameController {
 
         if (keyCode == KeyEvent.VK_ESCAPE && !isConfiguredGameKey(keyCode)) {
             exitToMenu();
-            return;
-        }
-        if (keyCode == Maincontainer.DOWN) {
+        } else if (keyCode == Maincontainer.DOWN) {
             dispatch(GameCommand.SOFT_DROP);
         } else if (keyCode == Maincontainer.RIGHT) {
             dispatch(GameCommand.RIGHT);
@@ -73,16 +85,84 @@ public final class GameController {
     }
 
     void dispatch(GameCommand command) {
+        Objects.requireNonNull(command, "command");
         if (!started || stopped) return;
-        switch (java.util.Objects.requireNonNull(command, "command")) {
-            case LEFT -> board.moveLeft();
-            case RIGHT -> board.moveRight();
-            case ROTATE -> board.rotate();
-            case SOFT_DROP -> board.moveDown();
-            case HARD_DROP -> board.hardDrop();
-            case TOGGLE_PAUSE -> board.togglePause();
+        if (advanceToNow(false)) return;
+        consume(engine.handle(command), true);
+    }
+
+    GameEngine engine() {
+        return engine;
+    }
+
+    GameSnapshot snapshot() {
+        return engine.snapshot();
+    }
+
+    Timer timer() {
+        return timer;
+    }
+
+    void refreshSnapshot() {
+        publish(engine.snapshot());
+    }
+
+    private void timerFired(ActionEvent event) {
+        long callbackGeneration;
+        try {
+            callbackGeneration = Long.parseLong(event.getActionCommand());
+        } catch (NumberFormatException ignored) {
+            return;
         }
-        if (command != GameCommand.TOGGLE_PAUSE) board.drawBoard();
+        if (stopped || callbackGeneration != timerGeneration) return;
+        advanceToNow(true);
+    }
+
+    /** Returns true when advancing ended or stopped the session. */
+    private boolean advanceToNow(boolean schedule) {
+        long now = clock.getAsLong();
+        long elapsed = Math.max(0L, now - lastAdvanceNanos);
+        lastAdvanceNanos = now;
+        consume(engine.advance(elapsed), schedule);
+        return stopped || snapshot().phase() == seoultech.se.tetris.game.GamePhase.GAME_OVER;
+    }
+
+    private void consume(GameUpdate update, boolean schedule) {
+        GameUpdate displayed = Objects.requireNonNull(update, "update");
+        if (displayed.lockResolution().isPresent()) {
+            displayed = engine.continueAfterLock(displayed.lockResolution().orElseThrow().turnId());
+        }
+        publish(displayed.snapshot());
+        if (displayed.gameEnd().isPresent() && !gameOverPublished) {
+            gameOverPublished = true;
+            cancelTimer();
+            gamepanel.gameOver();
+            return;
+        }
+        if (schedule && !stopped) schedule(displayed.nextWakeupNanos());
+    }
+
+    private void publish(GameSnapshot snapshot) {
+        board.showSnapshot(snapshot);
+        gamepanel.showSnapshot(snapshot);
+    }
+
+    private void schedule(OptionalLong wakeupNanos) {
+        timer.stop();
+        long generation = ++timerGeneration;
+        if (wakeupNanos.isEmpty() || stopped) return;
+        long nanos = wakeupNanos.orElseThrow();
+        long millis = Math.max(1L, (nanos + 999_999L) / 1_000_000L);
+        int delay = millis > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) millis;
+        timer.setActionCommand(Long.toString(generation));
+        timer.setInitialDelay(delay);
+        timer.restart();
+    }
+
+    private void cancelTimer() {
+        timer.stop();
+        timerGeneration++;
+        timer.setActionCommand(Long.toString(timerGeneration));
     }
 
     private static boolean isConfiguredGameKey(int keyCode) {
