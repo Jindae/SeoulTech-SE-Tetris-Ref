@@ -4,6 +4,7 @@ import java.awt.event.ActionEvent;
 import java.lang.reflect.Field;
 import java.time.Duration;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.LongSupplier;
 import javax.swing.Timer;
 import seoultech.se.tetris.Difficulty;
 import seoultech.se.tetris.GameMode;
@@ -29,13 +30,19 @@ final class ControllerFixture implements AutoCloseable {
     }
 
     ControllerFixture(GameMode mode, BattleEventSink events, Duration timeLimit) throws Exception {
+        this(mode, events, timeLimit, null);
+    }
+
+    ControllerFixture(GameMode mode, BattleEventSink events, Duration timeLimit,
+            LongSupplier timeSource) throws Exception {
         Field field = Unsafe.class.getDeclaredField("theUnsafe");
         field.setAccessible(true);
         owner = (TestOwner) ((Unsafe) field.get(null)).allocateInstance(TestOwner.class);
         owner.setting = owner.new Setting();
         engine = new GameEngine(new GameConfig(mode, Difficulty.NORMAL), new GeneratorBlockSource());
         state = new GameEngineFixture(engine);
-        game = new Gamepanel(owner, mode, engine, clock::get, events, timeLimit);
+        game = new Gamepanel(owner, mode, engine, timeSource == null ? clock::get : timeSource,
+            events, timeLimit);
         controller = game.controller();
     }
 

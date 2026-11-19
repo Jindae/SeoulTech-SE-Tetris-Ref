@@ -31,7 +31,12 @@ public final class MatchClock {
     }
 
     public boolean isExpired() {
-        return started && remainingNanos() == 0;
+        return isExpiredAt(nanoTime.getAsLong());
+    }
+
+    /** Uses a timestamp sampled from the same monotonic source as this clock. */
+    public boolean isExpiredAt(long nowNanos) {
+        return started && deadlineNanos - nowNanos <= 0;
     }
 
     public long remainingSeconds() {

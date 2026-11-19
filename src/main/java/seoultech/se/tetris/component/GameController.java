@@ -104,7 +104,7 @@ public final class GameController {
         Objects.requireNonNull(command, "command");
         if (!started || stopped) return;
         if (advanceToNow(false)) return;
-        if (expireIfNeeded()) return;
+        if (expireIfNeeded(clock.getAsLong())) return;
         consume(engine.handle(command), true);
     }
 
@@ -151,7 +151,7 @@ public final class GameController {
     /** Returns true when advancing ended or stopped the session. */
     private boolean advanceToNow(boolean schedule) {
         long now = clock.getAsLong();
-        if (expireIfNeeded()) return true;
+        if (expireIfNeeded(now)) return true;
         long elapsed = Math.max(0L, now - lastAdvanceNanos);
         lastAdvanceNanos = now;
         consume(engine.advance(elapsed), schedule);
@@ -210,8 +210,8 @@ public final class GameController {
         timer.setActionCommand(Long.toString(timerGeneration));
     }
 
-    private boolean expireIfNeeded() {
-        if (matchClock == null || !matchClock.isExpired()) return false;
+    private boolean expireIfNeeded(long nowNanos) {
+        if (matchClock == null || !matchClock.isExpiredAt(nowNanos)) return false;
         if (gameOverPublished || stopped) return true;
         gameOverPublished = true;
         stopped = true;

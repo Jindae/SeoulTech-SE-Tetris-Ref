@@ -5,6 +5,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import seoultech.se.tetris.GameMode;
 import seoultech.se.tetris.blocks.IBlock;
@@ -14,6 +16,30 @@ import seoultech.se.tetris.game.GameCommand;
 import seoultech.se.tetris.game.GamePhase;
 
 class GameControllerTimeLimitTest {
+    @Test
+    void samplesElapsedTimeAndDeadlineTogetherButRechecksBeforeInput() throws Exception {
+        ExistingFeatureFixture.onEdt(() -> {
+            RecordingEvents events = new RecordingEvents();
+            AtomicLong now = new AtomicLong();
+            AtomicBoolean advancing = new AtomicBoolean();
+            try (ControllerFixture f = new ControllerFixture(GameMode.TIME_LIMIT, events,
+                    Duration.ofSeconds(2), () -> advancing.get() ? now.getAndIncrement() : now.get())) {
+                f.prepare(new OBlock(), new OBlock(), new int[20][10], 3, 0);
+                now.set(Duration.ofSeconds(2).toNanos() - 1);
+                advancing.set(true);
+
+                f.controller.dispatch(GameCommand.HARD_DROP);
+
+                assertEquals(1, f.controller.snapshot().score(),
+                    "the pre-deadline elapsed sample permits one gravity step, but not the late hard drop");
+                assertEquals(GamePhase.STOPPED, f.controller.snapshot().phase());
+                assertEquals(1, events.expirations);
+                assertEquals(1, events.expiredScore);
+            }
+            return null;
+        });
+    }
+
     @Test
     void deadlineRejectsInputAndPublishesExpirationExactlyOnce() throws Exception {
         ExistingFeatureFixture.onEdt(() -> {
