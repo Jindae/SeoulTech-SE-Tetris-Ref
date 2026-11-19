@@ -51,6 +51,10 @@ class LegacyRegressionTest {
             System.out.print(output);
             assertTrue(completed, "회귀 검사 실행이 " + timeoutMinutes + "분을 초과했습니다.\n" + output);
             assertEquals(0, process.exitValue(), output);
+            if (coverage != null) {
+                assertTrue(Files.isRegularFile(coverage),
+                    "별도 JVM의 커버리지 기록 파일이 생성되어야 합니다.");
+            }
         } finally {
             if (process.isAlive()) {
                 terminate(process);

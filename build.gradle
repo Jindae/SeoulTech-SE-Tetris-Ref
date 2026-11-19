@@ -38,16 +38,20 @@ tasks.withType(JavaCompile).configureEach {
     options.compilerArgs.add('-Xlint:all')
 }
 
+def legacyCoverageFile = layout.buildDirectory.file('jacoco/legacy-regression.exec')
+
 tasks.named('test', Test) {
     useJUnitPlatform()
     failOnNoDiscoveredTests = true
     systemProperty 'java.awt.headless', 'true'
     // Gradle workers' java.class.path does not contain the full test runtime.
     systemProperty 'tetris.regression.classpath', sourceSets.test.runtimeClasspath.asPath
+    outputs.file(legacyCoverageFile)
     doFirst {
+        delete legacyCoverageFile
         systemProperty 'tetris.jacoco.agent', configurations.jacocoRuntimeAgent.singleFile.absolutePath
         systemProperty 'tetris.jacoco.destination',
-            extensions.getByName('jacoco').destinationFile.absolutePath
+            legacyCoverageFile.get().asFile.absolutePath
     }
     testLogging {
         events 'passed', 'skipped', 'failed'
@@ -57,6 +61,7 @@ tasks.named('test', Test) {
 
 tasks.named('jacocoTestReport', JacocoReport) {
     dependsOn tasks.named('test')
+    executionData legacyCoverageFile
     reports {
         xml.required = true
         html.required = true
@@ -66,6 +71,7 @@ tasks.named('jacocoTestReport', JacocoReport) {
 
 tasks.named('jacocoTestCoverageVerification', JacocoCoverageVerification) {
     dependsOn tasks.named('test')
+    executionData legacyCoverageFile
     violationRules {
         rule {
             limit {
@@ -77,9 +83,34 @@ tasks.named('jacocoTestCoverageVerification', JacocoCoverageVerification) {
     }
 }
 
+tasks.register('legacyRegressionCoverageVerification', JacocoCoverageVerification) {
+    group = 'verification'
+    description = 'Checks that isolated regression JVMs recorded executed product lines.'
+    dependsOn tasks.named('test')
+    executionData legacyCoverageFile
+    sourceSets project.sourceSets.main
+    // Missing execution data must fail instead of JaCoCo's default task skip.
+    setOnlyIf { true }
+    doFirst {
+        if (!legacyCoverageFile.get().asFile.isFile()) {
+            throw new GradleException('Missing isolated regression coverage data.')
+        }
+    }
+    violationRules {
+        rule {
+            limit {
+                counter = 'LINE'
+                value = 'COVEREDCOUNT'
+                minimum = 1
+            }
+        }
+    }
+}
+
 tasks.named('check') {
     dependsOn tasks.named('jacocoTestReport')
     dependsOn tasks.named('jacocoTestCoverageVerification')
+    dependsOn tasks.named('legacyRegressionCoverageVerification')
 }
 
 apply from: 'gradle/packaging.gradle'
